@@ -932,6 +932,51 @@
     });
   }
 
+  // ---------- Milestones tab ----------
+
+  function renderMilestones() {
+    const panel = document.getElementById('tab-milestones');
+    const active = state.habits.filter((h) => !h.archived);
+
+    if (active.length === 0) {
+      panel.innerHTML = `<div class="empty-state"><h3>Nothing yet</h3><p>Check in on a habit and milestones will show up here.</p></div>`;
+      return;
+    }
+
+    let html = '';
+    active.forEach((habit) => {
+      const totalCheckins = habit.checkins ? Object.keys(habit.checkins).length : 0;
+      const sortedKeys = habit.checkins ? Object.keys(habit.checkins).sort() : [];
+
+      const achieved = CHECKIN_MILESTONES.filter((m) => totalCheckins >= m);
+      const next = CHECKIN_MILESTONES.find((m) => totalCheckins < m);
+
+      const achievedHtml = achieved.length
+        ? achieved
+            .map((m) => {
+              const achievedKey = sortedKeys[m - 1];
+              const label = achievedKey ? formatDateKey(achievedKey) : '';
+              return `<p class="habit-sub milestone-row">🏆 ${m} check-ins${label ? ' · ' + label : ''}</p>`;
+            })
+            .join('')
+        : `<p class="habit-sub">No milestones yet — keep going.</p>`;
+
+      const nextHtml = next
+        ? `<p class="habit-sub" style="margin-top:6px;color:var(--text-muted);">Next: ${next} check-ins (${
+            next - totalCheckins
+          } to go)</p>`
+        : '';
+
+      html += `<div class="insight-card" style="background:color-mix(in srgb, var(--${habit.ramp}-fill) 45%, var(--surface-2));">
+        <p class="insight-label">${habit.icon} ${escapeHtml(habit.name)}</p>
+        ${achievedHtml}
+        ${nextHtml}
+      </div>`;
+    });
+
+    panel.innerHTML = html;
+  }
+
   // ---------- Habit create/edit modal ----------
 
   function openHabitModal(existingHabit) {
@@ -1325,6 +1370,7 @@
     renderWeek();
     renderHabitsTab();
     renderInsights();
+    renderMilestones();
   }
 
   // ---------- init ----------

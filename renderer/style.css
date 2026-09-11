@@ -79,11 +79,15 @@ body {
 
 .tab-btn {
   flex: 1;
+  min-width: 0;
   background: none;
   border: none;
-  padding: 10px 6px;
-  font-size: 13px;
+  padding: 10px 4px;
+  font-size: 12px;
   font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--text-secondary);
   cursor: pointer;
   border-bottom: 2px solid transparent;
