@@ -1183,6 +1183,12 @@
     if (window.api.onNavigateToToday) {
       window.api.onNavigateToToday(() => switchTab('today'));
     }
+    if (window.api.onDataChanged) {
+      window.api.onDataChanged(async () => {
+        await loadState();
+        renderAll();
+      });
+    }
     renderAll();
   }
 

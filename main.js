@@ -1,8 +1,10 @@
-const { app, BrowserWindow, ipcMain, Notification, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, Notification, Menu, Tray, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
 const DATA_FILE = path.join(app.getPath('userData'), 'habit-data.json');
+const BACKUP_DIR = path.join(app.getPath('userData'), 'backups');
+const BACKUP_RETENTION_DAYS = 30;
 
 function defaultData() {
   return { habits: [], settings: { notificationsEnabled: true } };
@@ -21,9 +23,37 @@ function loadData() {
   }
 }
 
+function writeBackup(data) {
+  try {
+    if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const file = path.join(BACKUP_DIR, `habit-data-${dateStr}.json`);
+    if (fs.existsSync(file)) return; // already have today's snapshot
+    fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf-8');
+    pruneOldBackups();
+  } catch (err) {
+    console.error('Failed to write backup:', err);
+  }
+}
+
+function pruneOldBackups() {
+  try {
+    const cutoff = Date.now() - BACKUP_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    fs.readdirSync(BACKUP_DIR)
+      .filter((f) => f.startsWith('habit-data-') && f.endsWith('.json'))
+      .forEach((f) => {
+        const full = path.join(BACKUP_DIR, f);
+        if (fs.statSync(full).mtimeMs < cutoff) fs.unlinkSync(full);
+      });
+  } catch (err) {
+    console.error('Failed to prune backups:', err);
+  }
+}
+
 function saveData(data) {
   try {
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf-8');
+    writeBackup(data);
     return true;
   } catch (err) {
     console.error('Failed to save data:', err);
@@ -32,6 +62,7 @@ function saveData(data) {
 }
 
 let mainWindow;
+let tray;
 let snoozedReminders = {}; // habitId -> timestamp when reminder should re-fire
 
 function createWindow() {
@@ -56,6 +87,64 @@ function createWindow() {
 function todayKey() {
   const d = new Date();
   return d.toISOString().slice(0, 10);
+}
+
+function toggleHabitFromTray(habitId) {
+  const data = loadData();
+  const habit = data.habits.find((h) => h.id === habitId);
+  if (!habit) return;
+
+  const key = todayKey();
+  habit.checkins = habit.checkins || {};
+  if (habit.checkins[key]) {
+    delete habit.checkins[key];
+  } else {
+    habit.checkins[key] = { done: true, mini: false, notes: [] };
+  }
+
+  saveData(data);
+  buildTrayMenu();
+  if (mainWindow) {
+    mainWindow.webContents.send('data-changed');
+  }
+}
+
+function buildTrayMenu() {
+  if (!tray) return;
+
+  const data = loadData();
+  const todayStr = todayKey();
+  const active = data.habits.filter((h) => !h.archived);
+  const doneCount = active.filter((h) => h.checkins && h.checkins[todayStr]).length;
+
+  const habitItems = active.map((h) => {
+    const done = !!(h.checkins && h.checkins[todayStr]);
+    return {
+      label: `${done ? '✓' : '○'}  ${h.name}`,
+      click: () => toggleHabitFromTray(h.id),
+    };
+  });
+
+  const menu = Menu.buildFromTemplate([
+    { label: active.length ? `${doneCount} of ${active.length} done today` : 'No habits yet', enabled: false },
+    { type: 'separator' },
+    ...(habitItems.length ? habitItems : [{ label: 'Add a habit to get started', enabled: false }]),
+    { type: 'separator' },
+    {
+      label: 'Open Habit Tracker',
+      click: () => {
+        if (mainWindow) {
+          mainWindow.show();
+        } else {
+          createWindow();
+        }
+      },
+    },
+    { label: 'Quit', click: () => app.quit() },
+  ]);
+
+  tray.setContextMenu(menu);
+  tray.setTitle(active.length ? `${doneCount}/${active.length}` : '');
 }
 
 function checkReminders() {
@@ -116,6 +205,11 @@ app.whenReady().then(() => {
   createWindow();
   setInterval(checkReminders, 60 * 1000);
 
+  tray = new Tray(nativeImage.createEmpty());
+  tray.setToolTip('Habit Tracker');
+  buildTrayMenu();
+  setInterval(buildTrayMenu, 60 * 1000);
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -126,4 +220,8 @@ app.on('window-all-closed', () => {
 });
 
 ipcMain.handle('load-data', () => loadData());
-ipcMain.handle('save-data', (_event, data) => saveData(data));
+ipcMain.handle('save-data', (_event, data) => {
+  const ok = saveData(data);
+  buildTrayMenu();
+  return ok;
+});
