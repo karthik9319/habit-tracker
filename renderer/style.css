@@ -472,16 +472,16 @@ button {
   border-radius: 50%;
   border: 2px solid var(--border-strong);
   background: var(--surface-2);
-  color: var(--text-muted);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
-  font-weight: 700;
-  opacity: 0.5;
+  font-size: 18px;
+  filter: grayscale(1);
+  opacity: 0.45;
 }
 .milestone-badge.achieved {
   opacity: 1;
+  filter: none;
   box-shadow: var(--icon-shadow);
 }
 .mini-week-strip {

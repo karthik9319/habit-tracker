@@ -22,6 +22,17 @@
 
   const DAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const CHECKIN_MILESTONES = [7, 14, 30, 50, 100, 200, 365, 500, 1000];
+  const MILESTONE_ICONS = {
+    7: '🌱',
+    14: '🔥',
+    30: '⭐',
+    50: '🎯',
+    100: '💯',
+    200: '🚀',
+    365: '🌳',
+    500: '💎',
+    1000: '👑',
+  };
 
   const ICON_CHOICES = [
     '🏃', '📖', '💧', '📝', '🧘', '😴', '🥗', '📚', '💻', '🎵',
@@ -956,10 +967,10 @@
             ? `${m} check-ins · ${formatDateKey(sortedKeys[m - 1])}`
             : `${m} check-ins`
           : `${m - totalCheckins} to go`;
-        const style = achieved ? `background:${c.mid};color:#fff;border-color:${c.mid};` : '';
+        const style = achieved ? `background:${c.mid};border-color:${c.mid};` : '';
         return `<div class="milestone-badge ${achieved ? 'achieved' : ''}" style="${style}" title="${escapeHtml(
           title
-        )}">${m}</div>`;
+        )}">${MILESTONE_ICONS[m] || '🏅'}</div>`;
       }).join('');
 
       const next = CHECKIN_MILESTONES.find((m) => totalCheckins < m);
