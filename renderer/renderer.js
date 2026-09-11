@@ -48,6 +48,7 @@
   let weekViewMode = 'week';
   let expandedNotesFor = new Set();
   let expandedInsightFor = new Set();
+  let expandedMilestoneFor = new Set();
 
   // ---------- persistence ----------
 
@@ -1039,6 +1040,7 @@
     active.forEach((habit) => {
       const c = rampVars(habit.ramp);
       const totalCheckins = habit.checkins ? Object.keys(habit.checkins).length : 0;
+      const achievedCheckinCount = CHECKIN_MILESTONES.filter((m) => totalCheckins >= m).length;
       const sortedKeys = habit.checkins ? Object.keys(habit.checkins).sort() : [];
 
       const badgesHtml = CHECKIN_MILESTONES.map((m) => {
@@ -1091,19 +1093,40 @@
       }</span>
       </div>`;
 
+      const totalAchieved =
+        achievedCheckinCount + STREAK_MILESTONES.filter((m) => streakInfo.longest >= m).length + (perfectAchieved ? 1 : 0);
+      const milestoneExpanded = expandedMilestoneFor.has(habit.id);
+      const summaryLabel = `🏅 ${totalAchieved} badge${totalAchieved === 1 ? '' : 's'} earned ${
+        milestoneExpanded ? '▲' : '▾'
+      }`;
+
+      const detailsHtml = milestoneExpanded
+        ? `<p class="milestone-section-label">Check-ins</p>
+           <div class="milestone-badge-row">${badgesHtml}</div>
+           ${nextHtml}
+           <p class="milestone-section-label">Streaks</p>
+           <div class="milestone-badge-row">${streakBadgesHtml}</div>
+           <p class="milestone-section-label">Consistency</p>
+           <div class="milestone-badge-row">${perfectHtml}</div>`
+        : '';
+
       html += `<div class="insight-card" style="background:color-mix(in srgb, var(--${habit.ramp}-fill) 45%, var(--surface-2));">
         <p class="insight-label">${habit.icon} ${escapeHtml(habit.name)}</p>
-        <p class="milestone-section-label">Check-ins</p>
-        <div class="milestone-badge-row">${badgesHtml}</div>
-        ${nextHtml}
-        <p class="milestone-section-label">Streaks</p>
-        <div class="milestone-badge-row">${streakBadgesHtml}</div>
-        <p class="milestone-section-label">Consistency</p>
-        <div class="milestone-badge-row">${perfectHtml}</div>
+        <button type="button" class="habit-sub habit-note-summary-btn milestone-toggle-btn" data-id="${habit.id}">${summaryLabel}</button>
+        ${detailsHtml}
       </div>`;
     });
 
     panel.innerHTML = html;
+
+    panel.querySelectorAll('.milestone-toggle-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.id;
+        if (expandedMilestoneFor.has(id)) expandedMilestoneFor.delete(id);
+        else expandedMilestoneFor.add(id);
+        renderMilestones();
+      });
+    });
   }
 
   // ---------- Habit create/edit modal ----------
