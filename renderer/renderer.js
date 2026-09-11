@@ -337,22 +337,27 @@
       notesHtml = `<button type="button" class="habit-sub habit-note-summary-btn">${summaryLabel}</button>${linesHtml}`;
     }
 
-    const weekSubLabel = habit.scheduleDays
-      ? `${done} of ${habit.target} scheduled days this week`
+    const isAvoid = habit.type === 'avoid';
+    const dayWord = isAvoid ? 'clean days' : habit.scheduleDays ? 'scheduled days' : null;
+    const weekSubLabel = dayWord
+      ? `${done} of ${habit.target} ${dayWord} this week`
       : `${done} of ${habit.target} this week`;
     const scheduleLabel = habit.scheduleDays
       ? `<p class="habit-sub" style="margin-top:1px;">${habit.scheduleDays.map((d) => DAY_ABBR[d]).join(', ')}</p>`
       : '';
+    const typeBadge = isAvoid ? `<span class="habit-type-badge">avoid</span>` : '';
 
     card.innerHTML = `
       <div class="habit-icon" style="background:${c.fill};">${habit.icon}</div>
       <div class="habit-info">
-        <p class="habit-name-row">${escapeHtml(habit.name)}${streakBadge}</p>
+        <p class="habit-name-row">${escapeHtml(habit.name)}${typeBadge}${streakBadge}</p>
         <p class="habit-sub">${weekSubLabel}</p>
         ${scheduleLabel}
         ${notesHtml}
       </div>
-      <button class="ring-check-btn" aria-label="${checkedToday ? 'Undo today' : 'Mark done today'}">
+      <button class="ring-check-btn" aria-label="${
+        checkedToday ? 'Undo today' : isAvoid ? 'Mark today clean' : 'Mark done today'
+      }">
         ${ringSvg(pct, c.mid, c.fill)}
         <span class="ring-check-mark" style="${checkedToday ? `background:${c.mid};` : ''}">${checkedToday ? '✓' : ''}</span>
       </button>
@@ -646,6 +651,7 @@
         const scheduleMeta = habit.scheduleDays
           ? habit.scheduleDays.map((d) => DAY_ABBR[d]).join('/')
           : `${habit.target}x / week`;
+        const typeMeta = habit.type === 'avoid' ? 'Avoid · ' : '';
         html += `
           <div class="habit-manage-row" data-id="${habit.id}">
             <div class="reorder-btns">
@@ -655,7 +661,7 @@
             <div class="habit-icon" style="background:${c.fill};width:32px;height:32px;font-size:15px;">${habit.icon}</div>
             <div class="habit-manage-info">
               <p class="habit-manage-name">${escapeHtml(habit.name)}</p>
-              <p class="habit-manage-meta">${scheduleMeta}${habit.reminderTime ? ' · reminder ' + habit.reminderTime : ''}</p>
+              <p class="habit-manage-meta">${typeMeta}${scheduleMeta}${habit.reminderTime ? ' · reminder ' + habit.reminderTime : ''}</p>
             </div>
             <button class="btn-text edit-habit-btn">Edit</button>
             <button class="btn-text archive-habit-btn">Archive</button>
@@ -680,10 +686,21 @@
     }
 
     html += `</div>
-      <button class="btn-secondary" id="export-btn" style="width:100%;margin-top:20px;">Copy data as JSON</button>
+      <p id="storage-status" class="habit-sub" style="margin:20px 0 0;">Checking storage…</p>
+      <button class="btn-secondary" id="export-btn" style="width:100%;margin-top:10px;">Copy data as JSON</button>
       <button class="btn-secondary" id="import-btn" style="width:100%;margin-top:8px;">Import data from JSON</button>`;
 
     panel.innerHTML = html;
+
+    if (window.api.getStorageInfo) {
+      window.api.getStorageInfo().then((info) => {
+        const el = document.getElementById('storage-status');
+        if (!el) return;
+        el.textContent = info.icloud
+          ? '☁️ Synced via iCloud Drive'
+          : '💾 Stored locally on this Mac only';
+      });
+    }
 
     panel.querySelector('#add-habit-btn-2').addEventListener('click', () => openHabitModal(null));
     panel.querySelector('#export-btn').addEventListener('click', () => {
@@ -1144,6 +1161,7 @@
           icon: assignIcon(''),
           ramp: assignRamp(),
           scheduleDays: null,
+          type: 'build',
         };
 
     const dayAbbr = DAY_ABBR;
@@ -1156,6 +1174,17 @@
             <label for="habit-name">Name</label>
             <input type="text" id="habit-name" placeholder="Morning walk" value="${escapeHtml(draft.name)}" />
             <p class="error-text" id="name-error" style="display:none;">Enter a name for the habit.</p>
+          </div>
+          <div class="form-group">
+            <label>Type</label>
+            <div class="freq-options" id="type-options">
+              <button type="button" class="freq-chip type-chip ${
+                (draft.type || 'build') === 'build' ? 'selected' : ''
+              }" data-type="build">Build a habit</button>
+              <button type="button" class="freq-chip type-chip ${
+                draft.type === 'avoid' ? 'selected' : ''
+              }" data-type="avoid">Avoid a habit</button>
+            </div>
           </div>
           <div class="form-group">
             <label>Schedule</label>
@@ -1221,6 +1250,15 @@
         </div>
       </div>
     `;
+
+    let selectedType = draft.type || 'build';
+    root.querySelectorAll('.type-chip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        root.querySelectorAll('.type-chip').forEach((c) => c.classList.remove('selected'));
+        chip.classList.add('selected');
+        selectedType = chip.dataset.type;
+      });
+    });
 
     let selectedTarget = draft.target;
     root.querySelectorAll('.target-chip').forEach((chip) => {
@@ -1318,6 +1356,7 @@
       if (isEdit) {
         const h = state.habits.find((x) => x.id === existingHabit.id);
         h.name = name;
+        h.type = selectedType;
         h.target = finalTarget;
         h.scheduleDays = scheduleDays;
         h.reminderTime = reminderTime;
@@ -1328,6 +1367,7 @@
         state.habits.push({
           id: 'h_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
           name,
+          type: selectedType,
           icon: selectedIcon,
           ramp: selectedRamp,
           target: finalTarget,

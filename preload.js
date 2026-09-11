@@ -6,4 +6,5 @@ contextBridge.exposeInMainWorld('api', {
   onNavigateToToday: (callback) => ipcRenderer.on('navigate-to-today', callback),
   onDataChanged: (callback) => ipcRenderer.on('data-changed', callback),
   toggleHabit: (habitId) => ipcRenderer.invoke('toggle-habit', habitId),
+  getStorageInfo: () => ipcRenderer.invoke('get-storage-info'),
 });

@@ -1,8 +1,32 @@
 const { app, BrowserWindow, ipcMain, Notification, Menu, Tray, nativeImage, globalShortcut } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 
-const DATA_FILE = path.join(app.getPath('userData'), 'habit-data.json');
+function resolveDataFile() {
+  const localFile = path.join(app.getPath('userData'), 'habit-data.json');
+  if (process.platform !== 'darwin') return { file: localFile, icloud: false };
+
+  try {
+    const icloudRoot = path.join(os.homedir(), 'Library', 'Mobile Documents', 'com~apple~CloudDocs');
+    if (!fs.existsSync(icloudRoot)) return { file: localFile, icloud: false };
+
+    const icloudDir = path.join(icloudRoot, 'HabitTracker');
+    const icloudFile = path.join(icloudDir, 'habit-data.json');
+    if (!fs.existsSync(icloudDir)) fs.mkdirSync(icloudDir, { recursive: true });
+
+    if (!fs.existsSync(icloudFile) && fs.existsSync(localFile)) {
+      fs.copyFileSync(localFile, icloudFile); // one-time migration of existing local data
+    }
+
+    return { file: icloudFile, icloud: true };
+  } catch (err) {
+    console.error('iCloud sync unavailable, falling back to local storage:', err);
+    return { file: localFile, icloud: false };
+  }
+}
+
+const { file: DATA_FILE, icloud: USING_ICLOUD } = resolveDataFile();
 const BACKUP_DIR = path.join(app.getPath('userData'), 'backups');
 const BACKUP_RETENTION_DAYS = 30;
 
@@ -52,7 +76,11 @@ function pruneOldBackups() {
 
 function saveData(data) {
   try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf-8');
+    // write-then-rename is atomic, avoiding a half-written file being picked up mid-sync
+    const tmpFile = `${DATA_FILE}.tmp`;
+    fs.writeFileSync(tmpFile, JSON.stringify(data, null, 2), 'utf-8');
+    fs.renameSync(tmpFile, DATA_FILE);
+    lastKnownMtime = fs.statSync(DATA_FILE).mtimeMs;
     writeBackup(data);
     return true;
   } catch (err) {
@@ -65,6 +93,17 @@ let mainWindow;
 let tray;
 let quickCheckWindow;
 let snoozedReminders = {}; // habitId -> timestamp when reminder should re-fire
+let lastKnownMtime = fs.existsSync(DATA_FILE) ? fs.statSync(DATA_FILE).mtimeMs : 0;
+
+function watchForExternalChanges() {
+  if (!fs.existsSync(DATA_FILE)) return;
+  fs.watchFile(DATA_FILE, { interval: 4000 }, (curr) => {
+    if (curr.mtimeMs === lastKnownMtime) return;
+    lastKnownMtime = curr.mtimeMs;
+    buildTrayMenu();
+    if (mainWindow) mainWindow.webContents.send('data-changed');
+  });
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -201,12 +240,19 @@ function checkReminders() {
 
     if (habit.reminderTime === hhmm && habit._lastNotified !== todayKey()) {
       habit._lastNotified = todayKey();
-      const phrases = [
-        `Got a couple minutes for ${habit.name}?`,
-        `Quick one: ${habit.name} today?`,
-        `${habit.name} is still open today.`,
-        `Small step: ${habit.name}?`,
-      ];
+      const phrases =
+        habit.type === 'avoid'
+          ? [
+              `Still staying clean on ${habit.name} today?`,
+              `Check in: ${habit.name}, still going strong?`,
+              `${habit.name} — mark today clean whenever you're ready.`,
+            ]
+          : [
+              `Got a couple minutes for ${habit.name}?`,
+              `Quick one: ${habit.name} today?`,
+              `${habit.name} is still open today.`,
+              `Small step: ${habit.name}?`,
+            ];
       const body = phrases[Math.floor(Math.random() * phrases.length)];
 
       const notification = new Notification({
@@ -299,6 +345,8 @@ function checkWeeklyRecap() {
 }
 
 app.whenReady().then(() => {
+  watchForExternalChanges();
+
   if (process.platform === 'darwin' && app.dock) {
     const iconPath = path.join(__dirname, 'build', 'icon.png');
     if (fs.existsSync(iconPath)) {
@@ -338,6 +386,7 @@ app.on('will-quit', () => {
 });
 
 ipcMain.handle('load-data', () => loadData());
+ipcMain.handle('get-storage-info', () => ({ icloud: USING_ICLOUD }));
 ipcMain.handle('save-data', (_event, data) => {
   const ok = saveData(data);
   buildTrayMenu();
