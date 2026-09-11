@@ -1,0 +1,35 @@
+{
+  "name": "habit-tracker",
+  "version": "1.0.0",
+  "description": "A simple cross-platform habit tracking app",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^43.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.example.habittracker",
+    "productName": "Habit Tracker",
+    "mac": {
+      "category": "public.app-category.lifestyle",
+      "target": ["dmg"]
+    },
+    "win": {
+      "target": ["nsis"]
+    },
+    "linux": {
+      "target": ["AppImage"]
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*"
+    ]
+  }
+}
