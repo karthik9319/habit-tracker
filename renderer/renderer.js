@@ -1,46 +1,32 @@
+import {
+  DAY_ABBR,
+  CHECKIN_MILESTONES,
+  MILESTONE_ICONS,
+  STREAK_MILESTONES,
+  STREAK_MILESTONE_ICONS,
+  ICON_CHOICES,
+  RAMPS,
+} from './constants.js';
+import { dateKey, todayKey, getWeekStart, weekDates, daysBetween, formatDateKey } from './date-utils.js';
+import {
+  weeklyCount,
+  weeklyStreak,
+  activePauseWindow,
+  weekOverlapsPause,
+  lastCheckinBeforeToday,
+  habitNoteSuggestions,
+  assignIcon,
+  assignRamp,
+  recentHabitNotes,
+  longestStreakEver,
+  streakMilestoneInfo,
+  perfectMonthsCount,
+  mostMentionedNote,
+  mostConsistentDay,
+} from './habit-stats.js';
+
 (function () {
   'use strict';
-
-  const RAMPS = ['teal', 'coral', 'amber', 'pink', 'purple', 'blue', 'green'];
-
-  const ICON_RULES = [
-    [/walk|run|jog|exercise|gym|workout|fitness/, '🏃'],
-    [/read|book/, '📖'],
-    [/water|drink|hydrat/, '💧'],
-    [/journal|write|notes|diary/, '📝'],
-    [/meditat|mindful|breath/, '🧘'],
-    [/sleep|bed/, '😴'],
-    [/eat|diet|food|meal|nutrition/, '🥗'],
-    [/study|learn|course/, '📚'],
-    [/code|program|dev/, '💻'],
-    [/music|guitar|piano|instrument|practice/, '🎵'],
-    [/yoga|stretch/, '🧘'],
-    [/clean|tidy|declutter/, '🧹'],
-    [/call|family|friend|connect/, '📞'],
-  ];
-  const FALLBACK_ICONS = ['✨', '🌱', '⭐', '🔥', '🎯'];
-
-  const DAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const CHECKIN_MILESTONES = [7, 14, 30, 50, 100, 200, 365, 500, 1000];
-  const MILESTONE_ICONS = {
-    7: '🥉',
-    14: '🥈',
-    30: '🥇',
-    50: '🏆',
-    100: '💯',
-    200: '🎖️',
-    365: '🌟',
-    500: '💎',
-    1000: '👑',
-  };
-
-  const STREAK_MILESTONES = [4, 12, 26, 52];
-  const STREAK_MILESTONE_ICONS = { 4: '🗓️', 12: '🍀', 26: '☀️', 52: '🏔️' };
-
-  const ICON_CHOICES = [
-    '🏃', '📖', '💧', '📝', '🧘', '😴', '🥗', '📚', '💻', '🎵',
-    '🧹', '📞', '✨', '🌱', '⭐', '🔥', '🎯', '🎨', '🧠', '☕',
-  ];
 
   let state = { habits: [], settings: { notificationsEnabled: true } };
   let currentTab = 'today';
@@ -93,87 +79,6 @@
     }
   }
 
-  // ---------- date helpers ----------
-
-  function dateKey(d) {
-    const yr = d.getFullYear();
-    const mo = String(d.getMonth() + 1).padStart(2, '0');
-    const da = String(d.getDate()).padStart(2, '0');
-    return `${yr}-${mo}-${da}`;
-  }
-
-  function todayKey() {
-    return dateKey(new Date());
-  }
-
-  function getWeekStart(d) {
-    const date = new Date(d);
-    const day = date.getDay();
-    const diff = (day === 0 ? -6 : 1) - day;
-    date.setDate(date.getDate() + diff);
-    date.setHours(0, 0, 0, 0);
-    return date;
-  }
-
-  function weekDates(weekStart) {
-    const out = [];
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(weekStart);
-      d.setDate(d.getDate() + i);
-      out.push(d);
-    }
-    return out;
-  }
-
-  function weeklyCount(habit, weekStart) {
-    let count = 0;
-    weekDates(weekStart).forEach((d) => {
-      const key = dateKey(d);
-      if (habit.checkins && habit.checkins[key]) count++;
-    });
-    return count;
-  }
-
-  function weeklyStreak(habit) {
-    const now = new Date();
-    let streak = 0;
-    let graceUsed = false;
-    let weekStart = getWeekStart(now);
-    if (weeklyCount(habit, weekStart) >= habit.target || weekOverlapsPause(habit, weekStart)) streak++;
-    let cursor = new Date(weekStart);
-    cursor.setDate(cursor.getDate() - 7);
-    const usedGraceMonths = new Set();
-    // guard against runaway loops on very old data
-    for (let i = 0; i < 520; i++) {
-      const c = weeklyCount(habit, cursor);
-      if (c >= habit.target || weekOverlapsPause(habit, cursor)) {
-        streak++;
-        cursor.setDate(cursor.getDate() - 7);
-      } else {
-        const graceKey = `${cursor.getFullYear()}-${cursor.getMonth()}`;
-        if (!usedGraceMonths.has(graceKey)) {
-          usedGraceMonths.add(graceKey);
-          streak++;
-          graceUsed = true;
-          cursor.setDate(cursor.getDate() - 7);
-        } else {
-          break;
-        }
-      }
-    }
-    return { count: streak, graceUsed };
-  }
-
-  function activePauseWindow(habit, key) {
-    if (!habit.pauseWindows) return null;
-    return habit.pauseWindows.find((w) => key >= w.from && key <= w.until) || null;
-  }
-
-  function weekOverlapsPause(habit, weekStart) {
-    if (!habit.pauseWindows) return false;
-    return weekDates(weekStart).some((d) => activePauseWindow(habit, dateKey(d)));
-  }
-
   function resumeHabitNow(habit) {
     const window = activePauseWindow(habit, todayKey());
     if (!window) return;
@@ -185,51 +90,6 @@
     }
     persist();
     renderAll();
-  }
-
-  function lastCheckinBeforeToday(habit) {
-    if (!habit.checkins) return null;
-    const keys = Object.keys(habit.checkins).filter((k) => k !== todayKey()).sort();
-    return keys.length ? keys[keys.length - 1] : null;
-  }
-
-  function daysBetween(keyA, keyB) {
-    const a = new Date(keyA);
-    const b = new Date(keyB);
-    return Math.round((b - a) / 86400000);
-  }
-
-  function habitNoteSuggestions(habit) {
-    if (!habit.dayNotes) return [];
-    const keys = Object.keys(habit.dayNotes).sort().reverse();
-    const seen = new Set();
-    const out = [];
-    for (const k of keys) {
-      const notes = habit.dayNotes[k] || [];
-      for (let i = notes.length - 1; i >= 0; i--) {
-        const note = notes[i];
-        if (note && !seen.has(note)) {
-          seen.add(note);
-          out.push(note);
-          if (out.length >= 8) return out;
-        }
-      }
-    }
-    return out;
-  }
-
-  // ---------- icon / color assignment ----------
-
-  function assignIcon(name) {
-    const lower = name.toLowerCase();
-    for (const [regex, icon] of ICON_RULES) {
-      if (regex.test(lower)) return icon;
-    }
-    return FALLBACK_ICONS[state.habits.length % FALLBACK_ICONS.length];
-  }
-
-  function assignRamp() {
-    return RAMPS[state.habits.length % RAMPS.length];
   }
 
   // ---------- toast ----------
@@ -867,175 +727,6 @@
     renderAll();
   }
 
-  function recentHabitNotes(habit, limit) {
-    if (!habit.dayNotes || !habit.checkins) return [];
-    const keys = Object.keys(habit.dayNotes).sort().reverse();
-    const out = [];
-    for (const k of keys) {
-      if (!habit.checkins[k]) continue; // only reflect notes for days actually marked done
-      const notes = habit.dayNotes[k] || [];
-      for (let i = notes.length - 1; i >= 0; i--) {
-        out.push({ date: k, note: notes[i] });
-        if (out.length >= limit) return out;
-      }
-    }
-    return out;
-  }
-
-  function formatDateKey(key) {
-    const [y, m, d] = key.split('-').map(Number);
-    return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-  }
-
-  function longestStreakEver(habit) {
-    if (!habit.checkins) return 0;
-    const keys = Object.keys(habit.checkins).sort();
-    if (keys.length === 0) return 0;
-
-    const start = getWeekStart(new Date(keys[0]));
-    const end = getWeekStart(new Date());
-
-    let longest = 0;
-    let current = 0;
-    const cursor = new Date(start);
-    let iterations = 0;
-    const usedGraceMonths = new Set();
-    while (cursor <= end && iterations < 1000) {
-      const count = weeklyCount(habit, cursor);
-      if (count >= habit.target || weekOverlapsPause(habit, cursor)) {
-        current++;
-        if (current > longest) longest = current;
-      } else {
-        const graceKey = `${cursor.getFullYear()}-${cursor.getMonth()}`;
-        if (!usedGraceMonths.has(graceKey)) {
-          usedGraceMonths.add(graceKey);
-          current++;
-          if (current > longest) longest = current;
-        } else {
-          current = 0;
-        }
-      }
-      cursor.setDate(cursor.getDate() + 7);
-      iterations++;
-    }
-    return longest;
-  }
-
-  function streakMilestoneInfo(habit) {
-    const dates = {};
-    let longest = 0;
-    if (!habit.checkins) return { longest, dates };
-    const keys = Object.keys(habit.checkins).sort();
-    if (keys.length === 0) return { longest, dates };
-
-    const start = getWeekStart(new Date(keys[0]));
-    const end = getWeekStart(new Date());
-
-    let current = 0;
-    const cursor = new Date(start);
-    let iterations = 0;
-    const usedGraceMonths = new Set();
-    while (cursor <= end && iterations < 1000) {
-      const count = weeklyCount(habit, cursor);
-      let met = false;
-      if (count >= habit.target || weekOverlapsPause(habit, cursor)) {
-        current++;
-        met = true;
-      } else {
-        const graceKey = `${cursor.getFullYear()}-${cursor.getMonth()}`;
-        if (!usedGraceMonths.has(graceKey)) {
-          usedGraceMonths.add(graceKey);
-          current++;
-          met = true;
-        } else {
-          current = 0;
-        }
-      }
-      if (met) {
-        if (current > longest) longest = current;
-        STREAK_MILESTONES.forEach((m) => {
-          if (current === m && !dates[m]) dates[m] = dateKey(cursor);
-        });
-      }
-      cursor.setDate(cursor.getDate() + 7);
-      iterations++;
-    }
-    return { longest, dates };
-  }
-
-  function perfectMonthsCount(habit) {
-    if (!habit.checkins) return 0;
-    const keys = Object.keys(habit.checkins).sort();
-    if (keys.length === 0) return 0;
-
-    const start = getWeekStart(new Date(keys[0]));
-    const end = getWeekStart(new Date());
-    const now = new Date();
-    const currentMonthKey = `${now.getFullYear()}-${now.getMonth()}`;
-
-    const months = {};
-    const cursor = new Date(start);
-    let iterations = 0;
-    while (cursor <= end && iterations < 1000) {
-      if (weekOverlapsPause(habit, cursor)) {
-        cursor.setDate(cursor.getDate() + 7);
-        iterations++;
-        continue; // paused weeks don't count for or against a perfect month
-      }
-      const monthKey = `${cursor.getFullYear()}-${cursor.getMonth()}`;
-      const met = weeklyCount(habit, cursor) >= habit.target;
-      if (!months[monthKey]) months[monthKey] = { total: 0, allMet: true };
-      months[monthKey].total++;
-      if (!met) months[monthKey].allMet = false;
-      cursor.setDate(cursor.getDate() + 7);
-      iterations++;
-    }
-
-    let perfect = 0;
-    Object.keys(months).forEach((mk) => {
-      if (mk === currentMonthKey) return;
-      if (months[mk].total >= 4 && months[mk].allMet) perfect++;
-    });
-    return perfect;
-  }
-
-  function mostMentionedNote(habit) {
-    if (!habit.dayNotes) return null;
-    const counts = {};
-    Object.values(habit.dayNotes).forEach((notes) => {
-      (notes || []).forEach((n) => {
-        counts[n] = (counts[n] || 0) + 1;
-      });
-    });
-    let best = null;
-    Object.keys(counts).forEach((n) => {
-      if (!best || counts[n] > counts[best]) best = n;
-    });
-    if (!best || counts[best] < 2) return null;
-    return { note: best, count: counts[best] };
-  }
-
-  function mostConsistentDay(habit) {
-    if (!habit.checkins) return null;
-    const keys = Object.keys(habit.checkins);
-    if (keys.length < 3) return null;
-
-    const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-    const counts = [0, 0, 0, 0, 0, 0, 0];
-    keys.forEach((k) => {
-      const [y, m, d] = k.split('-').map(Number);
-      const idx = (new Date(y, m - 1, d).getDay() + 6) % 7;
-      counts[idx]++;
-    });
-
-    let bestIdx = 0;
-    counts.forEach((c, i) => {
-      if (c > counts[bestIdx]) bestIdx = i;
-    });
-    if (counts[bestIdx] === 0) return null;
-    return { day: dayNames[bestIdx], count: counts[bestIdx] };
-  }
-
   function miniWeekStripHtml(habit, c) {
     const weekStart = getWeekStart(new Date());
     const dates = weekDates(weekStart);
@@ -1252,8 +943,8 @@
           target: 3,
           reminderTime: '',
           miniVersion: '',
-          icon: assignIcon(''),
-          ramp: assignRamp(),
+          icon: assignIcon('', state.habits.length),
+          ramp: assignRamp(state.habits.length),
           scheduleDays: null,
           type: 'build',
         };
@@ -1432,7 +1123,7 @@
     const nameInputEl = root.querySelector('#habit-name');
     nameInputEl.addEventListener('input', () => {
       if (isEdit || iconManuallySet) return;
-      const suggested = assignIcon(nameInputEl.value);
+      const suggested = assignIcon(nameInputEl.value, state.habits.length);
       selectedIcon = suggested;
       root.querySelectorAll('.icon-chip').forEach((c) => c.classList.toggle('selected', c.dataset.icon === suggested));
     });
