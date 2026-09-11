@@ -20,6 +20,11 @@
   ];
   const FALLBACK_ICONS = ['✨', '🌱', '⭐', '🔥', '🎯'];
 
+  const ICON_CHOICES = [
+    '🏃', '📖', '💧', '📝', '🧘', '😴', '🥗', '📚', '💻', '🎵',
+    '🧹', '📞', '✨', '🌱', '⭐', '🔥', '🎯', '🎨', '🧠', '☕',
+  ];
+
   let state = { habits: [], settings: { notificationsEnabled: true } };
   let currentTab = 'today';
   let openNoteHabitId = null;
@@ -450,6 +455,13 @@
         renderWeek();
       });
     });
+
+    panel.querySelectorAll('.day-dot-clickable').forEach((dot) => {
+      dot.addEventListener('click', () => {
+        const habit = state.habits.find((h) => h.id === dot.dataset.habitId);
+        if (habit) openDayNoteModal(habit, dot.dataset.dateKey);
+      });
+    });
   }
 
   function renderWeekGridHtml(active) {
@@ -478,7 +490,9 @@
           : '';
         html += `<div class="week-day">
           <div class="week-day-label">${dayLabels[i]}</div>
-          <div class="week-day-dot" style="${style}" ${notes.length ? `title="${escapeHtml(notes.join(' · '))}"` : ''}></div>
+          <div class="week-day-dot ${done ? 'day-dot-clickable' : ''}" style="${style}" ${
+          done ? `data-habit-id="${habit.id}" data-date-key="${key}"` : ''
+        } ${notes.length ? `title="${escapeHtml(notes.join(' · '))}"` : ''}></div>
         </div>`;
       });
       html += `</div></div>`;
@@ -527,7 +541,9 @@
           : '';
         const dateLabel = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
         const title = notes.length ? `${dateLabel}: ${notes.join(' · ')}` : dateLabel;
-        html += `<div class="month-day-dot" style="${style}" title="${escapeHtml(title)}"></div>`;
+        html += `<div class="month-day-dot ${done ? 'day-dot-clickable' : ''}" style="${style}" ${
+          done ? `data-habit-id="${habit.id}" data-date-key="${key}"` : ''
+        } title="${escapeHtml(title)}"></div>`;
       }
 
       html += `</div></div>`;
@@ -548,10 +564,14 @@
     if (active.length === 0) {
       html += `<p class="today-summary">No active habits.</p>`;
     } else {
-      active.forEach((habit) => {
+      active.forEach((habit, idx) => {
         const c = rampVars(habit.ramp);
         html += `
           <div class="habit-manage-row" data-id="${habit.id}">
+            <div class="reorder-btns">
+              <button type="button" class="reorder-btn move-up-btn" ${idx === 0 ? 'disabled' : ''} aria-label="Move up">▲</button>
+              <button type="button" class="reorder-btn move-down-btn" ${idx === active.length - 1 ? 'disabled' : ''} aria-label="Move down">▼</button>
+            </div>
             <div class="habit-icon" style="background:${c.fill};width:32px;height:32px;font-size:15px;">${habit.icon}</div>
             <div class="habit-manage-info">
               <p class="habit-manage-name">${escapeHtml(habit.name)}</p>
@@ -594,6 +614,18 @@
     });
     panel.querySelector('#import-btn').addEventListener('click', () => openImportModal());
 
+    panel.querySelectorAll('.move-up-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.target.closest('.habit-manage-row').dataset.id;
+        moveHabit(id, -1);
+      });
+    });
+    panel.querySelectorAll('.move-down-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.target.closest('.habit-manage-row').dataset.id;
+        moveHabit(id, 1);
+      });
+    });
     panel.querySelectorAll('.edit-habit-btn').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         const id = e.target.closest('.habit-manage-row').dataset.id;
@@ -627,6 +659,21 @@
         renderAll();
       });
     });
+  }
+
+  function moveHabit(id, direction) {
+    const active = state.habits.filter((h) => !h.archived);
+    const posInActive = active.findIndex((h) => h.id === id);
+    const swapPos = posInActive + direction;
+    if (posInActive === -1 || swapPos < 0 || swapPos >= active.length) return;
+    const otherId = active[swapPos].id;
+
+    const idxA = state.habits.findIndex((h) => h.id === id);
+    const idxB = state.habits.findIndex((h) => h.id === otherId);
+    [state.habits[idxA], state.habits[idxB]] = [state.habits[idxB], state.habits[idxA]];
+
+    persist();
+    renderAll();
   }
 
   function recentHabitNotes(habit, limit) {
@@ -819,7 +866,14 @@
     const isEdit = !!existingHabit;
     const draft = existingHabit
       ? { ...existingHabit }
-      : { name: '', target: 3, reminderTime: '', miniVersion: '' };
+      : {
+          name: '',
+          target: 3,
+          reminderTime: '',
+          miniVersion: '',
+          icon: assignIcon(''),
+          ramp: assignRamp(),
+        };
 
     root.innerHTML = `
       <div class="modal-overlay" id="modal-overlay">
@@ -839,6 +893,23 @@
                     `<button type="button" class="freq-chip ${n === draft.target ? 'selected' : ''}" data-val="${n}">${n}x</button>`
                 )
                 .join('')}
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Icon</label>
+            <div class="icon-options" id="icon-options">
+              ${ICON_CHOICES.map(
+                (ic) => `<button type="button" class="icon-chip ${ic === draft.icon ? 'selected' : ''}" data-icon="${ic}">${ic}</button>`
+              ).join('')}
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Color</label>
+            <div class="color-options" id="color-options">
+              ${RAMPS.map(
+                (r) =>
+                  `<button type="button" class="color-chip ${r === draft.ramp ? 'selected' : ''}" data-ramp="${r}" style="background:var(--${r}-mid);" aria-label="${r}"></button>`
+              ).join('')}
             </div>
           </div>
           <div class="form-group">
@@ -866,6 +937,34 @@
       });
     });
 
+    let selectedIcon = draft.icon;
+    let iconManuallySet = isEdit;
+    root.querySelectorAll('.icon-chip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        root.querySelectorAll('.icon-chip').forEach((c) => c.classList.remove('selected'));
+        chip.classList.add('selected');
+        selectedIcon = chip.dataset.icon;
+        iconManuallySet = true;
+      });
+    });
+
+    let selectedRamp = draft.ramp;
+    root.querySelectorAll('.color-chip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        root.querySelectorAll('.color-chip').forEach((c) => c.classList.remove('selected'));
+        chip.classList.add('selected');
+        selectedRamp = chip.dataset.ramp;
+      });
+    });
+
+    const nameInputEl = root.querySelector('#habit-name');
+    nameInputEl.addEventListener('input', () => {
+      if (isEdit || iconManuallySet) return;
+      const suggested = assignIcon(nameInputEl.value);
+      selectedIcon = suggested;
+      root.querySelectorAll('.icon-chip').forEach((c) => c.classList.toggle('selected', c.dataset.icon === suggested));
+    });
+
     root.querySelector('#modal-cancel').addEventListener('click', closeModal);
     root.querySelector('#modal-overlay').addEventListener('click', (e) => {
       if (e.target.id === 'modal-overlay') closeModal();
@@ -891,12 +990,14 @@
         h.target = selectedTarget;
         h.reminderTime = reminderTime;
         h.miniVersion = miniVersion;
+        h.icon = selectedIcon;
+        h.ramp = selectedRamp;
       } else {
         state.habits.push({
           id: 'h_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
           name,
-          icon: assignIcon(name),
-          ramp: assignRamp(),
+          icon: selectedIcon,
+          ramp: selectedRamp,
           target: selectedTarget,
           reminderTime,
           miniVersion,
@@ -919,6 +1020,71 @@
 
   function closeModal() {
     document.getElementById('modal-root').innerHTML = '';
+  }
+
+  // ---------- Backfill note modal ----------
+
+  function openDayNoteModal(habit, key) {
+    const root = document.getElementById('modal-root');
+    const entry = habit.checkins && habit.checkins[key];
+    if (!entry) {
+      closeModal();
+      return;
+    }
+
+    const suggestions = habitNoteSuggestions(habit);
+    const listId = `day-note-suggestions-${habit.id}`;
+    const notes = entry.notes || [];
+    const notesListHtml = notes.length
+      ? notes.map((n) => `<p class="habit-sub habit-note">• ${escapeHtml(n)}</p>`).join('')
+      : `<p class="habit-sub">No notes yet for this day.</p>`;
+
+    root.innerHTML = `
+      <div class="modal-overlay" id="modal-overlay">
+        <div class="modal">
+          <h2>${habit.icon} ${escapeHtml(habit.name)}</h2>
+          <p class="habit-sub" style="margin:-8px 0 14px;">${formatDateKey(key)}</p>
+          <div id="day-notes-list">${notesListHtml}</div>
+          <div class="form-group" style="margin-top:14px;">
+            <label for="day-note-input">Add a note</label>
+            <input type="text" id="day-note-input" list="${listId}" placeholder="e.g. which book" />
+            <datalist id="${listId}">
+              ${suggestions.map((s) => `<option value="${escapeHtml(s)}"></option>`).join('')}
+            </datalist>
+          </div>
+          <div class="modal-actions">
+            <button class="btn-secondary" id="modal-cancel">Close</button>
+            <button class="btn-primary" id="modal-save-day-note">Add note</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    root.querySelector('#modal-cancel').addEventListener('click', closeModal);
+    root.querySelector('#modal-overlay').addEventListener('click', (e) => {
+      if (e.target.id === 'modal-overlay') closeModal();
+    });
+
+    const addNoteToDay = () => {
+      const input = root.querySelector('#day-note-input');
+      const val = input.value.trim();
+      if (!val) return;
+      entry.notes = entry.notes || [];
+      entry.notes.push(val);
+      persist();
+      renderAll();
+      openDayNoteModal(habit, key);
+    };
+
+    root.querySelector('#modal-save-day-note').addEventListener('click', addNoteToDay);
+    root.querySelector('#day-note-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        addNoteToDay();
+      }
+    });
+
+    setTimeout(() => root.querySelector('#day-note-input').focus(), 30);
   }
 
   // ---------- Import modal ----------
