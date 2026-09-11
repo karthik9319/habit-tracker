@@ -34,6 +34,9 @@
     1000: '👑',
   };
 
+  const STREAK_MILESTONES = [4, 12, 26, 52];
+  const STREAK_MILESTONE_ICONS = { 4: '🗓️', 12: '🍀', 26: '☀️', 52: '🏔️' };
+
   const ICON_CHOICES = [
     '🏃', '📖', '💧', '📝', '🧘', '😴', '🥗', '📚', '💻', '🎵',
     '🧹', '📞', '✨', '🌱', '⭐', '🔥', '🎯', '🎨', '🧠', '☕',
@@ -730,6 +733,11 @@
     panel.querySelectorAll('.delete-habit-btn').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         const id = e.target.closest('.habit-manage-row').dataset.id;
+        const h = state.habits.find((x) => x.id === id);
+        const ok = window.confirm(
+          `Permanently delete "${h ? h.name : 'this habit'}"? This removes all its history, notes, and milestones — this can't be undone.`
+        );
+        if (!ok) return;
         state.habits = state.habits.filter((x) => x.id !== id);
         persist();
         renderAll();
@@ -804,6 +812,79 @@
       iterations++;
     }
     return longest;
+  }
+
+  function streakMilestoneInfo(habit) {
+    const dates = {};
+    let longest = 0;
+    if (!habit.checkins) return { longest, dates };
+    const keys = Object.keys(habit.checkins).sort();
+    if (keys.length === 0) return { longest, dates };
+
+    const start = getWeekStart(new Date(keys[0]));
+    const end = getWeekStart(new Date());
+
+    let current = 0;
+    const cursor = new Date(start);
+    let iterations = 0;
+    const usedGraceMonths = new Set();
+    while (cursor <= end && iterations < 1000) {
+      const count = weeklyCount(habit, cursor);
+      let met = false;
+      if (count >= habit.target) {
+        current++;
+        met = true;
+      } else {
+        const graceKey = `${cursor.getFullYear()}-${cursor.getMonth()}`;
+        if (!usedGraceMonths.has(graceKey)) {
+          usedGraceMonths.add(graceKey);
+          current++;
+          met = true;
+        } else {
+          current = 0;
+        }
+      }
+      if (met) {
+        if (current > longest) longest = current;
+        STREAK_MILESTONES.forEach((m) => {
+          if (current === m && !dates[m]) dates[m] = dateKey(cursor);
+        });
+      }
+      cursor.setDate(cursor.getDate() + 7);
+      iterations++;
+    }
+    return { longest, dates };
+  }
+
+  function perfectMonthsCount(habit) {
+    if (!habit.checkins) return 0;
+    const keys = Object.keys(habit.checkins).sort();
+    if (keys.length === 0) return 0;
+
+    const start = getWeekStart(new Date(keys[0]));
+    const end = getWeekStart(new Date());
+    const now = new Date();
+    const currentMonthKey = `${now.getFullYear()}-${now.getMonth()}`;
+
+    const months = {};
+    const cursor = new Date(start);
+    let iterations = 0;
+    while (cursor <= end && iterations < 1000) {
+      const monthKey = `${cursor.getFullYear()}-${cursor.getMonth()}`;
+      const met = weeklyCount(habit, cursor) >= habit.target;
+      if (!months[monthKey]) months[monthKey] = { total: 0, allMet: true };
+      months[monthKey].total++;
+      if (!met) months[monthKey].allMet = false;
+      cursor.setDate(cursor.getDate() + 7);
+      iterations++;
+    }
+
+    let perfect = 0;
+    Object.keys(months).forEach((mk) => {
+      if (mk === currentMonthKey) return;
+      if (months[mk].total >= 4 && months[mk].allMet) perfect++;
+    });
+    return perfect;
   }
 
   function mostMentionedNote(habit) {
@@ -981,10 +1062,44 @@
           } to go)</p>`
         : `<p class="habit-sub" style="margin-top:8px;color:var(--text-muted);">All milestones reached 🎉</p>`;
 
+      const streakInfo = streakMilestoneInfo(habit);
+      const streakBadgesHtml = STREAK_MILESTONES.map((m) => {
+        const achieved = streakInfo.longest >= m;
+        const achievedDate = streakInfo.dates[m];
+        const title = achieved
+          ? achievedDate
+            ? `${m}-week streak · ${formatDateKey(achievedDate)}`
+            : `${m}-week streak`
+          : `${m - streakInfo.longest} more week${m - streakInfo.longest === 1 ? '' : 's'} needed`;
+        const style = achieved ? `background:${c.mid};border-color:${c.mid};` : '';
+        return `<div class="milestone-badge-wrap" title="${escapeHtml(title)}">
+          <div class="milestone-badge ${achieved ? 'achieved' : ''}" style="${style}">${STREAK_MILESTONE_ICONS[m]}</div>
+          <span class="milestone-badge-label ${achieved ? 'achieved' : ''}">${m}w</span>
+        </div>`;
+      }).join('');
+
+      const perfectMonths = perfectMonthsCount(habit);
+      const perfectAchieved = perfectMonths >= 1;
+      const perfectTitle = perfectAchieved
+        ? `${perfectMonths} perfect month${perfectMonths === 1 ? '' : 's'} — hit your target every week`
+        : 'Hit your target every week in a calendar month to unlock';
+      const perfectStyle = perfectAchieved ? `background:${c.mid};border-color:${c.mid};` : '';
+      const perfectHtml = `<div class="milestone-badge-wrap" title="${escapeHtml(perfectTitle)}">
+        <div class="milestone-badge ${perfectAchieved ? 'achieved' : ''}" style="${perfectStyle}">🏵️</div>
+        <span class="milestone-badge-label ${perfectAchieved ? 'achieved' : ''}">${
+        perfectAchieved ? '×' + perfectMonths : 'Perfect'
+      }</span>
+      </div>`;
+
       html += `<div class="insight-card" style="background:color-mix(in srgb, var(--${habit.ramp}-fill) 45%, var(--surface-2));">
         <p class="insight-label">${habit.icon} ${escapeHtml(habit.name)}</p>
+        <p class="milestone-section-label">Check-ins</p>
         <div class="milestone-badge-row">${badgesHtml}</div>
         ${nextHtml}
+        <p class="milestone-section-label">Streaks</p>
+        <div class="milestone-badge-row">${streakBadgesHtml}</div>
+        <p class="milestone-section-label">Consistency</p>
+        <div class="milestone-badge-row">${perfectHtml}</div>
       </div>`;
     });
 

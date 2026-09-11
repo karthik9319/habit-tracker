@@ -459,6 +459,14 @@ button {
   color: var(--text-muted);
   margin-right: 6px;
 }
+.milestone-section-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  margin: 14px 0 0;
+}
 .milestone-badge-row {
   display: flex;
   flex-wrap: wrap;
