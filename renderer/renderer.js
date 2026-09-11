@@ -945,31 +945,33 @@
 
     let html = '';
     active.forEach((habit) => {
+      const c = rampVars(habit.ramp);
       const totalCheckins = habit.checkins ? Object.keys(habit.checkins).length : 0;
       const sortedKeys = habit.checkins ? Object.keys(habit.checkins).sort() : [];
 
-      const achieved = CHECKIN_MILESTONES.filter((m) => totalCheckins >= m);
+      const badgesHtml = CHECKIN_MILESTONES.map((m) => {
+        const achieved = totalCheckins >= m;
+        const title = achieved
+          ? sortedKeys[m - 1]
+            ? `${m} check-ins · ${formatDateKey(sortedKeys[m - 1])}`
+            : `${m} check-ins`
+          : `${m - totalCheckins} to go`;
+        const style = achieved ? `background:${c.mid};color:#fff;border-color:${c.mid};` : '';
+        return `<div class="milestone-badge ${achieved ? 'achieved' : ''}" style="${style}" title="${escapeHtml(
+          title
+        )}">${m}</div>`;
+      }).join('');
+
       const next = CHECKIN_MILESTONES.find((m) => totalCheckins < m);
-
-      const achievedHtml = achieved.length
-        ? achieved
-            .map((m) => {
-              const achievedKey = sortedKeys[m - 1];
-              const label = achievedKey ? formatDateKey(achievedKey) : '';
-              return `<p class="habit-sub milestone-row">🏆 ${m} check-ins${label ? ' · ' + label : ''}</p>`;
-            })
-            .join('')
-        : `<p class="habit-sub">No milestones yet — keep going.</p>`;
-
       const nextHtml = next
-        ? `<p class="habit-sub" style="margin-top:6px;color:var(--text-muted);">Next: ${next} check-ins (${
+        ? `<p class="habit-sub" style="margin-top:8px;color:var(--text-muted);">Next: ${next} check-ins (${
             next - totalCheckins
           } to go)</p>`
-        : '';
+        : `<p class="habit-sub" style="margin-top:8px;color:var(--text-muted);">All milestones reached 🎉</p>`;
 
       html += `<div class="insight-card" style="background:color-mix(in srgb, var(--${habit.ramp}-fill) 45%, var(--surface-2));">
         <p class="insight-label">${habit.icon} ${escapeHtml(habit.name)}</p>
-        ${achievedHtml}
+        <div class="milestone-badge-row">${badgesHtml}</div>
         ${nextHtml}
       </div>`;
     });
