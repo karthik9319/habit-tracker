@@ -461,10 +461,10 @@ button {
 }
 .milestone-badge-row {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  justify-items: center;
+  grid-template-columns: repeat(3, 44px);
+  justify-content: center;
   row-gap: 14px;
-  column-gap: 8px;
+  column-gap: 14px;
   margin-top: 10px;
 }
 .milestone-badge-wrap {
