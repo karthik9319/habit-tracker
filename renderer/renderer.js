@@ -876,13 +876,12 @@
         : '';
 
       html += `<div class="insight-card" style="background:color-mix(in srgb, var(--${habit.ramp}-fill) 45%, var(--surface-2));">
-        <p class="insight-label">${habit.icon} ${escapeHtml(habit.name)}</p>
+        <button type="button" class="insight-label insight-toggle-btn" data-id="${habit.id}">${habit.icon} ${escapeHtml(
+        habit.name
+      )} ${insightExpanded ? '▲' : '▾'}</button>
         <p class="insight-value">${done}/${habit.target} this week</p>
         ${weekStripHtml}
         ${detailsHtml}
-        <button type="button" class="btn-text insight-toggle-btn" data-id="${habit.id}" style="padding:0;margin-top:6px;font-size:12px;">${
-        insightExpanded ? '– Hide details' : '+ Show details'
-      }</button>
       </div>`;
     });
 
