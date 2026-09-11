@@ -194,11 +194,11 @@
   // ---------- SVG ring ----------
 
   function ringSvg(pct, midColor, fillColor) {
-    const r = 17, c = 2 * Math.PI * r;
+    const r = 26, c = 2 * Math.PI * r;
     const offset = c * (1 - Math.min(pct, 1));
-    return `<svg width="42" height="42" viewBox="0 0 42 42" style="transform: rotate(-90deg);">
-      <circle cx="21" cy="21" r="${r}" fill="none" stroke="${fillColor}" stroke-width="4"></circle>
-      <circle cx="21" cy="21" r="${r}" fill="none" stroke="${midColor}" stroke-width="4" stroke-linecap="round"
+    return `<svg width="64" height="64" viewBox="0 0 64 64" style="transform: rotate(-90deg);">
+      <circle cx="32" cy="32" r="${r}" fill="none" stroke="${fillColor}" stroke-width="6"></circle>
+      <circle cx="32" cy="32" r="${r}" fill="none" stroke="${midColor}" stroke-width="6" stroke-linecap="round"
         stroke-dasharray="${c}" stroke-dashoffset="${offset}" style="transition: stroke-dashoffset 0.35s ease;"></circle>
     </svg>`;
   }
@@ -229,8 +229,16 @@
     }
 
     const doneToday = active.filter((h) => h.checkins && h.checkins[todayKey()]).length;
+    const now = new Date();
+    const hour = now.getHours();
+    const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+    const dateLabel = now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
 
     panel.innerHTML = `
+      <div class="today-header">
+        <h2 class="today-greeting">${greeting}</h2>
+        <p class="today-date">${dateLabel}</p>
+      </div>
       <p class="today-summary">${doneToday} of ${active.length} done today</p>
       <div class="habit-list" id="today-list"></div>
       <button class="btn-secondary" id="add-habit-btn" style="width:100%;margin-top:14px;">+ Add habit</button>
@@ -280,14 +288,13 @@
         <p class="habit-sub">${done} of ${habit.target} this week</p>
         ${notesHtml}
       </div>
-      <div class="ring-wrap">${ringSvg(pct, c.mid, c.fill)}</div>
-      <button class="check-btn ${checkedToday ? 'checked' : ''}" aria-label="${checkedToday ? 'Undo today' : 'Mark done today'}"
-        style="${checkedToday ? `background:${c.mid};border-color:${c.mid};` : ''}">
-        ${checkedToday ? '✓' : ''}
+      <button class="ring-check-btn" aria-label="${checkedToday ? 'Undo today' : 'Mark done today'}">
+        ${ringSvg(pct, c.mid, c.fill)}
+        <span class="ring-check-mark" style="${checkedToday ? `background:${c.mid};` : ''}">${checkedToday ? '✓' : ''}</span>
       </button>
     `;
 
-    const btn = card.querySelector('.check-btn');
+    const btn = card.querySelector('.ring-check-btn');
     btn.addEventListener('click', () => toggleCheckin(habit, btn));
 
     const summaryBtn = card.querySelector('.habit-note-summary-btn');
@@ -307,7 +314,7 @@
       mini.className = 'btn-text';
       mini.style.cssText = 'display:block;margin-top:6px;padding:0;font-size:12px;';
       const miniWrap = document.createElement('div');
-      miniWrap.style.cssText = 'margin:-4px 0 0 62px;';
+      miniWrap.style.cssText = 'margin:-4px 0 0 86px;';
       miniWrap.appendChild(mini);
       wrap.appendChild(miniWrap);
       mini.addEventListener('click', () => toggleCheckin(habit, btn, true));
@@ -321,7 +328,7 @@
         addNote.type = 'button';
         addNote.textContent = todayNotes.length ? '+ add another note' : '+ add a note';
         addNote.className = 'btn-text';
-        addNote.style.cssText = 'display:block;margin:4px 0 0 62px;padding:0;font-size:12px;';
+        addNote.style.cssText = 'display:block;margin:4px 0 0 86px;padding:0;font-size:12px;';
         addNote.addEventListener('click', () => {
           openNoteHabitId = habit.id;
           renderToday();
@@ -334,7 +341,7 @@
         hideNote.type = 'button';
         hideNote.textContent = '– hide notes';
         hideNote.className = 'btn-text';
-        hideNote.style.cssText = 'display:block;margin:2px 0 0 62px;padding:0;font-size:12px;';
+        hideNote.style.cssText = 'display:block;margin:2px 0 0 86px;padding:0;font-size:12px;';
         hideNote.addEventListener('click', () => {
           expandedNotesFor.delete(habit.id);
           renderToday();
