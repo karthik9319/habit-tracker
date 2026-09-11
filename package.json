@@ -16,8 +16,10 @@
   "build": {
     "appId": "com.example.habittracker",
     "productName": "Habit Tracker",
+    "icon": "build/icon",
     "mac": {
       "category": "public.app-category.lifestyle",
+      "icon": "build/icon.icns",
       "target": ["dmg"]
     },
     "win": {

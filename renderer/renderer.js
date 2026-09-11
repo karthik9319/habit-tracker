@@ -20,6 +20,8 @@
   ];
   const FALLBACK_ICONS = ['✨', '🌱', '⭐', '🔥', '🎯'];
 
+  const DAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
   const ICON_CHOICES = [
     '🏃', '📖', '💧', '📝', '🧘', '😴', '🥗', '📚', '💻', '🎵',
     '🧹', '📞', '✨', '🌱', '⭐', '🔥', '🎯', '🎨', '🧠', '☕',
@@ -48,13 +50,19 @@
 
   function migrateNoteFields() {
     state.habits.forEach((habit) => {
+      habit.dayNotes = habit.dayNotes || {};
       if (!habit.checkins) return;
       Object.keys(habit.checkins).forEach((k) => {
         const entry = habit.checkins[k];
-        if (entry && !entry.notes) {
-          entry.notes = entry.note ? [entry.note] : [];
-          delete entry.note;
+        if (!entry) return;
+        if (!entry.notes && entry.note) {
+          entry.notes = [entry.note];
         }
+        if (entry.notes && entry.notes.length && !(habit.dayNotes[k] && habit.dayNotes[k].length)) {
+          habit.dayNotes[k] = entry.notes.slice();
+        }
+        delete entry.note;
+        delete entry.notes;
       });
     });
   }
@@ -143,12 +151,12 @@
   }
 
   function habitNoteSuggestions(habit) {
-    if (!habit.checkins) return [];
-    const keys = Object.keys(habit.checkins).sort().reverse();
+    if (!habit.dayNotes) return [];
+    const keys = Object.keys(habit.dayNotes).sort().reverse();
     const seen = new Set();
     const out = [];
     for (const k of keys) {
-      const notes = (habit.checkins[k] && habit.checkins[k].notes) || [];
+      const notes = habit.dayNotes[k] || [];
       for (let i = notes.length - 1; i >= 0; i--) {
         const note = notes[i];
         if (note && !seen.has(note)) {
@@ -275,7 +283,8 @@
         ? `<span class="streak-badge" style="background:${c.fill};color:${c.text};">🔥 ${streak}</span>`
         : '';
 
-    const todayNotes = (checkedToday && todayEntry.notes) || [];
+    const todayKeyStr = todayKey();
+    const todayNotes = (checkedToday && habit.dayNotes && habit.dayNotes[todayKeyStr]) || [];
     const notesExpanded = expandedNotesFor.has(habit.id);
     let notesHtml = '';
     if (checkedToday && todayNotes.length > 0) {
@@ -283,16 +292,29 @@
         notesExpanded ? '▲' : '▾'
       }`;
       const linesHtml = notesExpanded
-        ? todayNotes.map((n) => `<p class="habit-sub habit-note">• ${escapeHtml(n)}</p>`).join('')
+        ? todayNotes
+            .map(
+              (n, i) =>
+                `<p class="habit-sub habit-note">• ${escapeHtml(n)} <button type="button" class="note-delete-btn" data-idx="${i}" aria-label="Delete note">×</button></p>`
+            )
+            .join('')
         : '';
       notesHtml = `<button type="button" class="habit-sub habit-note-summary-btn">${summaryLabel}</button>${linesHtml}`;
     }
+
+    const weekSubLabel = habit.scheduleDays
+      ? `${done} of ${habit.target} scheduled days this week`
+      : `${done} of ${habit.target} this week`;
+    const scheduleLabel = habit.scheduleDays
+      ? `<p class="habit-sub" style="margin-top:1px;">${habit.scheduleDays.map((d) => DAY_ABBR[d]).join(', ')}</p>`
+      : '';
 
     card.innerHTML = `
       <div class="habit-icon" style="background:${c.fill};">${habit.icon}</div>
       <div class="habit-info">
         <p class="habit-name-row">${escapeHtml(habit.name)}${streakBadge}</p>
-        <p class="habit-sub">${done} of ${habit.target} this week</p>
+        <p class="habit-sub">${weekSubLabel}</p>
+        ${scheduleLabel}
         ${notesHtml}
       </div>
       <button class="ring-check-btn" aria-label="${checkedToday ? 'Undo today' : 'Mark done today'}">
@@ -312,6 +334,18 @@
         renderToday();
       });
     }
+
+    card.querySelectorAll('.note-delete-btn').forEach((delBtn) => {
+      delBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const idx = Number(delBtn.dataset.idx);
+        if (habit.dayNotes && habit.dayNotes[todayKeyStr]) {
+          habit.dayNotes[todayKeyStr].splice(idx, 1);
+          persist();
+          renderToday();
+        }
+      });
+    });
 
     const wrap = document.createElement('div');
     wrap.appendChild(card);
@@ -370,8 +404,9 @@
       committed = true;
       const val = input.value.trim();
       if (val && habit.checkins[key]) {
-        habit.checkins[key].notes = habit.checkins[key].notes || [];
-        habit.checkins[key].notes.push(val);
+        habit.dayNotes = habit.dayNotes || {};
+        habit.dayNotes[key] = habit.dayNotes[key] || [];
+        habit.dayNotes[key].push(val);
       }
       openNoteHabitId = null;
       persist();
@@ -405,7 +440,7 @@
       if (openNoteHabitId === habit.id) openNoteHabitId = null;
     } else {
       const gapKey = lastCheckinBeforeToday(habit);
-      habit.checkins[key] = { done: true, mini: !!isMini, notes: [] };
+      habit.checkins[key] = { done: true, mini: !!isMini };
       if (gapKey && daysBetween(gapKey, key) >= 10) {
         habit._returnedAfterGap = true;
       }
@@ -481,7 +516,7 @@
         const key = dateKey(d);
         const entry = habit.checkins && habit.checkins[key];
         const done = !!entry;
-        const notes = (entry && entry.notes) || [];
+        const notes = (done && habit.dayNotes && habit.dayNotes[key]) || [];
         const isFuture = key > todayStr;
         const style = done
           ? `background:${c.mid};border-color:${c.mid};`
@@ -532,7 +567,7 @@
         const key = dateKey(date);
         const entry = habit.checkins && habit.checkins[key];
         const done = !!entry;
-        const notes = (entry && entry.notes) || [];
+        const notes = (done && habit.dayNotes && habit.dayNotes[key]) || [];
         const isFuture = key > todayStr;
         const style = done
           ? `background:${c.mid};border-color:${c.mid};`
@@ -566,6 +601,9 @@
     } else {
       active.forEach((habit, idx) => {
         const c = rampVars(habit.ramp);
+        const scheduleMeta = habit.scheduleDays
+          ? habit.scheduleDays.map((d) => DAY_ABBR[d]).join('/')
+          : `${habit.target}x / week`;
         html += `
           <div class="habit-manage-row" data-id="${habit.id}">
             <div class="reorder-btns">
@@ -575,7 +613,7 @@
             <div class="habit-icon" style="background:${c.fill};width:32px;height:32px;font-size:15px;">${habit.icon}</div>
             <div class="habit-manage-info">
               <p class="habit-manage-name">${escapeHtml(habit.name)}</p>
-              <p class="habit-manage-meta">${habit.target}x / week${habit.reminderTime ? ' · reminder ' + habit.reminderTime : ''}</p>
+              <p class="habit-manage-meta">${scheduleMeta}${habit.reminderTime ? ' · reminder ' + habit.reminderTime : ''}</p>
             </div>
             <button class="btn-text edit-habit-btn">Edit</button>
             <button class="btn-text archive-habit-btn">Archive</button>
@@ -677,11 +715,12 @@
   }
 
   function recentHabitNotes(habit, limit) {
-    if (!habit.checkins) return [];
-    const keys = Object.keys(habit.checkins).sort().reverse();
+    if (!habit.dayNotes || !habit.checkins) return [];
+    const keys = Object.keys(habit.dayNotes).sort().reverse();
     const out = [];
     for (const k of keys) {
-      const notes = (habit.checkins[k] && habit.checkins[k].notes) || [];
+      if (!habit.checkins[k]) continue; // only reflect notes for days actually marked done
+      const notes = habit.dayNotes[k] || [];
       for (let i = notes.length - 1; i >= 0; i--) {
         out.push({ date: k, note: notes[i] });
         if (out.length >= limit) return out;
@@ -722,10 +761,10 @@
   }
 
   function mostMentionedNote(habit) {
-    if (!habit.checkins) return null;
+    if (!habit.dayNotes) return null;
     const counts = {};
-    Object.values(habit.checkins).forEach((entry) => {
-      (entry.notes || []).forEach((n) => {
+    Object.values(habit.dayNotes).forEach((notes) => {
+      (notes || []).forEach((n) => {
         counts[n] = (counts[n] || 0) + 1;
       });
     });
@@ -873,7 +912,10 @@
           miniVersion: '',
           icon: assignIcon(''),
           ramp: assignRamp(),
+          scheduleDays: null,
         };
+
+    const dayAbbr = DAY_ABBR;
 
     root.innerHTML = `
       <div class="modal-overlay" id="modal-overlay">
@@ -885,15 +927,36 @@
             <p class="error-text" id="name-error" style="display:none;">Enter a name for the habit.</p>
           </div>
           <div class="form-group">
+            <label>Schedule</label>
+            <div class="freq-options" id="schedule-mode-options">
+              <button type="button" class="freq-chip schedule-mode-chip ${!draft.scheduleDays ? 'selected' : ''}" data-mode="count">Any days/week</button>
+              <button type="button" class="freq-chip schedule-mode-chip ${draft.scheduleDays ? 'selected' : ''}" data-mode="days">Specific days</button>
+            </div>
+          </div>
+          <div class="form-group" id="weekly-target-group" style="${draft.scheduleDays ? 'display:none;' : ''}">
             <label>Weekly target</label>
             <div class="freq-options" id="freq-options">
               ${[1, 2, 3, 4, 5, 6, 7]
                 .map(
                   (n) =>
-                    `<button type="button" class="freq-chip ${n === draft.target ? 'selected' : ''}" data-val="${n}">${n}x</button>`
+                    `<button type="button" class="freq-chip target-chip ${n === draft.target ? 'selected' : ''}" data-val="${n}">${n}x</button>`
                 )
                 .join('')}
             </div>
+          </div>
+          <div class="form-group" id="schedule-days-group" style="${draft.scheduleDays ? '' : 'display:none;'}">
+            <label>Days</label>
+            <div class="freq-options" id="schedule-days-options">
+              ${dayAbbr
+                .map(
+                  (d, i) =>
+                    `<button type="button" class="freq-chip day-chip ${
+                      draft.scheduleDays && draft.scheduleDays.includes(i) ? 'selected' : ''
+                    }" data-day="${i}">${d}</button>`
+                )
+                .join('')}
+            </div>
+            <p class="error-text" id="schedule-error" style="display:none;">Pick at least one day.</p>
           </div>
           <div class="form-group">
             <label>Icon</label>
@@ -929,11 +992,35 @@
     `;
 
     let selectedTarget = draft.target;
-    root.querySelectorAll('.freq-chip').forEach((chip) => {
+    root.querySelectorAll('.target-chip').forEach((chip) => {
       chip.addEventListener('click', () => {
-        root.querySelectorAll('.freq-chip').forEach((c) => c.classList.remove('selected'));
+        root.querySelectorAll('.target-chip').forEach((c) => c.classList.remove('selected'));
         chip.classList.add('selected');
         selectedTarget = Number(chip.dataset.val);
+      });
+    });
+
+    let scheduleMode = draft.scheduleDays ? 'days' : 'count';
+    const selectedDays = new Set(draft.scheduleDays || []);
+    root.querySelectorAll('.schedule-mode-chip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        root.querySelectorAll('.schedule-mode-chip').forEach((c) => c.classList.remove('selected'));
+        chip.classList.add('selected');
+        scheduleMode = chip.dataset.mode;
+        root.querySelector('#weekly-target-group').style.display = scheduleMode === 'count' ? '' : 'none';
+        root.querySelector('#schedule-days-group').style.display = scheduleMode === 'days' ? '' : 'none';
+      });
+    });
+    root.querySelectorAll('.day-chip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        const day = Number(chip.dataset.day);
+        if (selectedDays.has(day)) {
+          selectedDays.delete(day);
+          chip.classList.remove('selected');
+        } else {
+          selectedDays.add(day);
+          chip.classList.add('selected');
+        }
       });
     });
 
@@ -981,13 +1068,27 @@
       }
       errorEl.style.display = 'none';
 
+      if (scheduleMode === 'days' && selectedDays.size === 0) {
+        root.querySelector('#schedule-error').style.display = 'block';
+        return;
+      }
+      root.querySelector('#schedule-error').style.display = 'none';
+
       const reminderTime = root.querySelector('#habit-reminder').value || null;
       const miniVersion = root.querySelector('#habit-mini').value.trim() || null;
+
+      let scheduleDays = null;
+      let finalTarget = selectedTarget;
+      if (scheduleMode === 'days') {
+        scheduleDays = Array.from(selectedDays).sort((a, b) => a - b);
+        finalTarget = scheduleDays.length;
+      }
 
       if (isEdit) {
         const h = state.habits.find((x) => x.id === existingHabit.id);
         h.name = name;
-        h.target = selectedTarget;
+        h.target = finalTarget;
+        h.scheduleDays = scheduleDays;
         h.reminderTime = reminderTime;
         h.miniVersion = miniVersion;
         h.icon = selectedIcon;
@@ -998,7 +1099,8 @@
           name,
           icon: selectedIcon,
           ramp: selectedRamp,
-          target: selectedTarget,
+          target: finalTarget,
+          scheduleDays,
           reminderTime,
           miniVersion,
           createdAt: new Date().toISOString(),
@@ -1034,9 +1136,14 @@
 
     const suggestions = habitNoteSuggestions(habit);
     const listId = `day-note-suggestions-${habit.id}`;
-    const notes = entry.notes || [];
+    const notes = (habit.dayNotes && habit.dayNotes[key]) || [];
     const notesListHtml = notes.length
-      ? notes.map((n) => `<p class="habit-sub habit-note">• ${escapeHtml(n)}</p>`).join('')
+      ? notes
+          .map(
+            (n, i) =>
+              `<p class="habit-sub habit-note">• ${escapeHtml(n)} <button type="button" class="note-delete-btn" data-idx="${i}" aria-label="Delete note">×</button></p>`
+          )
+          .join('')
       : `<p class="habit-sub">No notes yet for this day.</p>`;
 
     root.innerHTML = `
@@ -1065,12 +1172,25 @@
       if (e.target.id === 'modal-overlay') closeModal();
     });
 
+    root.querySelectorAll('.note-delete-btn').forEach((delBtn) => {
+      delBtn.addEventListener('click', () => {
+        const idx = Number(delBtn.dataset.idx);
+        if (habit.dayNotes && habit.dayNotes[key]) {
+          habit.dayNotes[key].splice(idx, 1);
+          persist();
+          renderAll();
+          openDayNoteModal(habit, key);
+        }
+      });
+    });
+
     const addNoteToDay = () => {
       const input = root.querySelector('#day-note-input');
       const val = input.value.trim();
       if (!val) return;
-      entry.notes = entry.notes || [];
-      entry.notes.push(val);
+      habit.dayNotes = habit.dayNotes || {};
+      habit.dayNotes[key] = habit.dayNotes[key] || [];
+      habit.dayNotes[key].push(val);
       persist();
       renderAll();
       openDayNoteModal(habit, key);

@@ -264,6 +264,18 @@ button {
 .habit-note-summary-btn:hover {
   color: var(--text-primary);
 }
+.note-delete-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 0 0 4px;
+  cursor: pointer;
+}
+.note-delete-btn:hover {
+  color: #B5443C;
+}
 
 .note-input-row {
   margin: -2px 0 2px 86px;

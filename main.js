@@ -157,6 +157,7 @@ function checkReminders() {
 
   data.habits.forEach((habit) => {
     if (habit.archived || !habit.reminderTime) return;
+    if (habit.scheduleDays && !habit.scheduleDays.includes(now.getDay())) return;
 
     const snoozeUntil = snoozedReminders[habit.id];
     if (snoozeUntil && Date.now() < snoozeUntil) return;
@@ -201,9 +202,82 @@ function checkReminders() {
   saveData(data);
 }
 
+function getWeekStartKey(d) {
+  const date = new Date(d);
+  const day = date.getDay();
+  const diff = (day === 0 ? -6 : 1) - day;
+  date.setDate(date.getDate() + diff);
+  return dateKeyMain(date);
+}
+
+function dateKeyMain(d) {
+  const yr = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, '0');
+  const da = String(d.getDate()).padStart(2, '0');
+  return `${yr}-${mo}-${da}`;
+}
+
+function weeklyCountForRecap(habit, weekStartKey) {
+  const [y, m, d] = weekStartKey.split('-').map(Number);
+  const start = new Date(y, m - 1, d);
+  let count = 0;
+  for (let i = 0; i < 7; i++) {
+    const dt = new Date(start);
+    dt.setDate(dt.getDate() + i);
+    if (habit.checkins && habit.checkins[dateKeyMain(dt)]) count++;
+  }
+  return count;
+}
+
+function checkWeeklyRecap() {
+  const data = loadData();
+  if (!data.settings.notificationsEnabled) return;
+  if (!Notification.isSupported()) return;
+
+  const now = new Date();
+  if (now.getDay() !== 0) return; // Sunday only
+  const hhmm = now.toTimeString().slice(0, 5);
+  if (hhmm !== '20:00') return;
+
+  const weekStartKey = getWeekStartKey(now);
+  if (data._lastRecapWeek === weekStartKey) return;
+
+  const active = data.habits.filter((h) => !h.archived);
+  if (active.length === 0) return;
+
+  const hitCount = active.filter((h) => weeklyCountForRecap(h, weekStartKey) >= h.target).length;
+
+  data._lastRecapWeek = weekStartKey;
+  saveData(data);
+
+  const notification = new Notification({
+    title: 'Habit Tracker',
+    body: `This week: ${hitCount} of ${active.length} habits hit their target.`,
+  });
+
+  notification.on('click', () => {
+    if (mainWindow) {
+      mainWindow.show();
+      mainWindow.webContents.send('navigate-to-today');
+    }
+  });
+
+  notification.show();
+}
+
 app.whenReady().then(() => {
+  if (process.platform === 'darwin' && app.dock) {
+    const iconPath = path.join(__dirname, 'build', 'icon.png');
+    if (fs.existsSync(iconPath)) {
+      app.dock.setIcon(nativeImage.createFromPath(iconPath));
+    }
+  }
+
   createWindow();
-  setInterval(checkReminders, 60 * 1000);
+  setInterval(() => {
+    checkReminders();
+    checkWeeklyRecap();
+  }, 60 * 1000);
 
   tray = new Tray(nativeImage.createEmpty());
   tray.setToolTip('Habit Tracker');
