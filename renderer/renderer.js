@@ -274,11 +274,13 @@
     const notesExpanded = expandedNotesFor.has(habit.id);
     let notesHtml = '';
     if (checkedToday && todayNotes.length > 0) {
-      notesHtml = notesExpanded
-        ? todayNotes.map((n) => `<p class="habit-sub habit-note">📝 ${escapeHtml(n)}</p>`).join('')
-        : `<button type="button" class="habit-sub habit-note-summary-btn">📝 ${todayNotes.length} note${
-            todayNotes.length === 1 ? '' : 's'
-          } — tap to view</button>`;
+      const summaryLabel = `📝 ${todayNotes.length} note${todayNotes.length === 1 ? '' : 's'} ${
+        notesExpanded ? '▲' : '▾'
+      }`;
+      const linesHtml = notesExpanded
+        ? todayNotes.map((n) => `<p class="habit-sub habit-note">• ${escapeHtml(n)}</p>`).join('')
+        : '';
+      notesHtml = `<button type="button" class="habit-sub habit-note-summary-btn">${summaryLabel}</button>${linesHtml}`;
     }
 
     card.innerHTML = `
@@ -300,7 +302,8 @@
     const summaryBtn = card.querySelector('.habit-note-summary-btn');
     if (summaryBtn) {
       summaryBtn.addEventListener('click', () => {
-        expandedNotesFor.add(habit.id);
+        if (expandedNotesFor.has(habit.id)) expandedNotesFor.delete(habit.id);
+        else expandedNotesFor.add(habit.id);
         renderToday();
       });
     }
@@ -334,19 +337,6 @@
           renderToday();
         });
         wrap.appendChild(addNote);
-      }
-
-      if (todayNotes.length > 0 && notesExpanded) {
-        const hideNote = document.createElement('button');
-        hideNote.type = 'button';
-        hideNote.textContent = '– hide notes';
-        hideNote.className = 'btn-text';
-        hideNote.style.cssText = 'display:block;margin:2px 0 0 86px;padding:0;font-size:12px;';
-        hideNote.addEventListener('click', () => {
-          expandedNotesFor.delete(habit.id);
-          renderToday();
-        });
-        wrap.appendChild(hideNote);
       }
     }
 
