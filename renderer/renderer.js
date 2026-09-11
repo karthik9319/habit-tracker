@@ -21,6 +21,7 @@
   const FALLBACK_ICONS = ['✨', '🌱', '⭐', '🔥', '🎯'];
 
   const DAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const CHECKIN_MILESTONES = [7, 14, 30, 50, 100, 200, 365, 500, 1000];
 
   const ICON_CHOICES = [
     '🏃', '📖', '💧', '📝', '🧘', '😴', '🥗', '📚', '💻', '🎵',
@@ -121,10 +122,12 @@
   function weeklyStreak(habit) {
     const now = new Date();
     let streak = 0;
+    let graceUsed = false;
     let weekStart = getWeekStart(now);
     if (weeklyCount(habit, weekStart) >= habit.target) streak++;
     let cursor = new Date(weekStart);
     cursor.setDate(cursor.getDate() - 7);
+    const usedGraceMonths = new Set();
     // guard against runaway loops on very old data
     for (let i = 0; i < 520; i++) {
       const c = weeklyCount(habit, cursor);
@@ -132,10 +135,18 @@
         streak++;
         cursor.setDate(cursor.getDate() - 7);
       } else {
-        break;
+        const graceKey = `${cursor.getFullYear()}-${cursor.getMonth()}`;
+        if (!usedGraceMonths.has(graceKey)) {
+          usedGraceMonths.add(graceKey);
+          streak++;
+          graceUsed = true;
+          cursor.setDate(cursor.getDate() - 7);
+        } else {
+          break;
+        }
       }
     }
-    return streak;
+    return { count: streak, graceUsed };
   }
 
   function lastCheckinBeforeToday(habit) {
@@ -186,22 +197,28 @@
   // ---------- toast ----------
 
   let toastTimer = null;
-  function showToast(message) {
+  function showToast(message, options) {
+    const celebratory = options && options.celebratory;
     let el = document.getElementById('toast');
     if (!el) {
       el = document.createElement('div');
       el.id = 'toast';
       el.style.cssText =
-        'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#2C2C2A;color:#fff;' +
-        'padding:10px 16px;border-radius:10px;font-size:13px;z-index:200;opacity:0;transition:opacity 0.2s ease;max-width:320px;text-align:center;';
+        'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);color:#fff;' +
+        'padding:10px 16px;border-radius:10px;font-size:13px;z-index:200;opacity:0;transition:opacity 0.2s ease, background 0.15s ease;max-width:320px;text-align:center;';
       document.body.appendChild(el);
     }
     el.textContent = message;
+    el.style.background = celebratory ? 'var(--purple-mid)' : '#2C2C2A';
+    el.style.fontWeight = celebratory ? '600' : 'normal';
     el.style.opacity = '1';
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => {
-      el.style.opacity = '0';
-    }, 2600);
+    toastTimer = setTimeout(
+      () => {
+        el.style.opacity = '0';
+      },
+      celebratory ? 3600 : 2600
+    );
   }
 
   // ---------- SVG ring ----------
@@ -275,12 +292,15 @@
     const todayEntry = habit.checkins && habit.checkins[todayKey()];
     const checkedToday = !!todayEntry;
     const pct = habit.target > 0 ? done / habit.target : 0;
-    const streak = weeklyStreak(habit);
+    const streakInfo = weeklyStreak(habit);
+    const streak = streakInfo.count;
     const c = rampVars(habit.ramp);
 
     const streakBadge =
       streak > 0
-        ? `<span class="streak-badge" style="background:${c.fill};color:${c.text};">🔥 ${streak}</span>`
+        ? `<span class="streak-badge" style="background:${c.fill};color:${c.text};" ${
+            streakInfo.graceUsed ? 'title="Includes a forgiven week"' : ''
+          }>🔥 ${streak}${streakInfo.graceUsed ? ' ❄️' : ''}</span>`
         : '';
 
     const todayKeyStr = todayKey();
@@ -445,6 +465,13 @@
         habit._returnedAfterGap = true;
       }
       openNoteHabitId = habit.id;
+
+      const totalCheckins = Object.keys(habit.checkins).length;
+      habit._celebratedMilestones = habit._celebratedMilestones || [];
+      if (CHECKIN_MILESTONES.includes(totalCheckins) && !habit._celebratedMilestones.includes(totalCheckins)) {
+        habit._celebratedMilestones.push(totalCheckins);
+        showToast(`🎉 ${totalCheckins} check-ins for ${habit.name}!`, { celebratory: true });
+      }
     }
 
     if (btnEl) {
@@ -746,13 +773,21 @@
     let current = 0;
     const cursor = new Date(start);
     let iterations = 0;
+    const usedGraceMonths = new Set();
     while (cursor <= end && iterations < 1000) {
       const count = weeklyCount(habit, cursor);
       if (count >= habit.target) {
         current++;
         if (current > longest) longest = current;
       } else {
-        current = 0;
+        const graceKey = `${cursor.getFullYear()}-${cursor.getMonth()}`;
+        if (!usedGraceMonths.has(graceKey)) {
+          usedGraceMonths.add(graceKey);
+          current++;
+          if (current > longest) longest = current;
+        } else {
+          current = 0;
+        }
       }
       cursor.setDate(cursor.getDate() + 7);
       iterations++;

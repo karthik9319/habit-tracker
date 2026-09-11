@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+  <title>Quick check-in</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #FAF7F0;
+      color: #2C2C2A;
+      padding: 14px;
+      -webkit-app-region: drag;
+    }
+    h1 {
+      font-size: 13px;
+      font-weight: 600;
+      color: #6B6A63;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+      margin: 0 0 10px;
+    }
+    #list { -webkit-app-region: no-drag; }
+    .quick-habit-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      text-align: left;
+      padding: 10px 12px;
+      margin-bottom: 6px;
+      border: 1px solid #E7E3D8;
+      border-radius: 10px;
+      background: #FFFFFF;
+      color: #2C2C2A;
+      font-size: 14px;
+      font-family: inherit;
+      cursor: pointer;
+    }
+    .quick-habit-btn:hover { background: #F3F0E8; }
+    .quick-habit-btn:disabled { opacity: 0.5; cursor: default; }
+    .empty-msg {
+      font-size: 13px;
+      color: #6B6A63;
+      text-align: center;
+      margin-top: 24px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Quick check-in</h1>
+  <div id="list"></div>
+  <script src="quickcheck.js"></script>
+</body>
+</html>

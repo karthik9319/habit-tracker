@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Notification, Menu, Tray, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, Notification, Menu, Tray, nativeImage, globalShortcut } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -63,6 +63,7 @@ function saveData(data) {
 
 let mainWindow;
 let tray;
+let quickCheckWindow;
 let snoozedReminders = {}; // habitId -> timestamp when reminder should re-fire
 
 function createWindow() {
@@ -89,7 +90,7 @@ function todayKey() {
   return d.toISOString().slice(0, 10);
 }
 
-function toggleHabitFromTray(habitId) {
+function toggleHabitCheckin(habitId) {
   const data = loadData();
   const habit = data.habits.find((h) => h.id === habitId);
   if (!habit) return;
@@ -99,7 +100,7 @@ function toggleHabitFromTray(habitId) {
   if (habit.checkins[key]) {
     delete habit.checkins[key];
   } else {
-    habit.checkins[key] = { done: true, mini: false, notes: [] };
+    habit.checkins[key] = { done: true, mini: false };
   }
 
   saveData(data);
@@ -107,6 +108,38 @@ function toggleHabitFromTray(habitId) {
   if (mainWindow) {
     mainWindow.webContents.send('data-changed');
   }
+}
+
+function openQuickCheck() {
+  if (quickCheckWindow) {
+    quickCheckWindow.focus();
+    return;
+  }
+  quickCheckWindow = new BrowserWindow({
+    width: 320,
+    height: 420,
+    frame: false,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    center: true,
+    show: false,
+    backgroundColor: '#faf8f3',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  quickCheckWindow.loadFile(path.join(__dirname, 'renderer', 'quickcheck.html'));
+  quickCheckWindow.once('ready-to-show', () => quickCheckWindow.show());
+  quickCheckWindow.on('blur', () => {
+    if (quickCheckWindow) quickCheckWindow.close();
+  });
+  quickCheckWindow.on('closed', () => {
+    quickCheckWindow = null;
+  });
 }
 
 function buildTrayMenu() {
@@ -121,7 +154,7 @@ function buildTrayMenu() {
     const done = !!(h.checkins && h.checkins[todayStr]);
     return {
       label: `${done ? '✓' : '○'}  ${h.name}`,
-      click: () => toggleHabitFromTray(h.id),
+      click: () => toggleHabitCheckin(h.id),
     };
   });
 
@@ -284,6 +317,13 @@ app.whenReady().then(() => {
   buildTrayMenu();
   setInterval(buildTrayMenu, 60 * 1000);
 
+  const registered = globalShortcut.register('CommandOrControl+Shift+H', () => {
+    openQuickCheck();
+  });
+  if (!registered) {
+    console.error('Failed to register global quick-check shortcut (may be in use by another app).');
+  }
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -293,9 +333,17 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
+});
+
 ipcMain.handle('load-data', () => loadData());
 ipcMain.handle('save-data', (_event, data) => {
   const ok = saveData(data);
   buildTrayMenu();
   return ok;
+});
+ipcMain.handle('toggle-habit', (_event, habitId) => {
+  toggleHabitCheckin(habitId);
+  return true;
 });
