@@ -31,7 +31,7 @@ const BACKUP_DIR = path.join(app.getPath('userData'), 'backups');
 const BACKUP_RETENTION_DAYS = 30;
 
 function defaultData() {
-  return { habits: [], settings: { notificationsEnabled: true } };
+  return { habits: [], settings: { notificationsEnabled: true, weeklyRecapEnabled: true } };
 }
 
 function loadData() {
@@ -219,6 +219,11 @@ function buildTrayMenu() {
   tray.setTitle(active.length ? `${doneCount}/${active.length}` : '');
 }
 
+function isPausedOn(habit, key) {
+  if (!habit.pauseWindows) return false;
+  return habit.pauseWindows.some((w) => key >= w.from && key <= w.until);
+}
+
 function checkReminders() {
   const data = loadData();
   if (!data.settings.notificationsEnabled) return;
@@ -230,6 +235,7 @@ function checkReminders() {
   data.habits.forEach((habit) => {
     if (habit.archived || !habit.reminderTime) return;
     if (habit.scheduleDays && !habit.scheduleDays.includes(now.getDay())) return;
+    if (isPausedOn(habit, todayKey())) return;
 
     const snoozeUntil = snoozedReminders[habit.id];
     if (snoozeUntil && Date.now() < snoozeUntil) return;
@@ -310,7 +316,7 @@ function weeklyCountForRecap(habit, weekStartKey) {
 
 function checkWeeklyRecap() {
   const data = loadData();
-  if (!data.settings.notificationsEnabled) return;
+  if (data.settings.weeklyRecapEnabled === false) return;
   if (!Notification.isSupported()) return;
 
   const now = new Date();

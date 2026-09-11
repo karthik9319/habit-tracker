@@ -139,14 +139,14 @@
     let streak = 0;
     let graceUsed = false;
     let weekStart = getWeekStart(now);
-    if (weeklyCount(habit, weekStart) >= habit.target) streak++;
+    if (weeklyCount(habit, weekStart) >= habit.target || weekOverlapsPause(habit, weekStart)) streak++;
     let cursor = new Date(weekStart);
     cursor.setDate(cursor.getDate() - 7);
     const usedGraceMonths = new Set();
     // guard against runaway loops on very old data
     for (let i = 0; i < 520; i++) {
       const c = weeklyCount(habit, cursor);
-      if (c >= habit.target) {
+      if (c >= habit.target || weekOverlapsPause(habit, cursor)) {
         streak++;
         cursor.setDate(cursor.getDate() - 7);
       } else {
@@ -162,6 +162,29 @@
       }
     }
     return { count: streak, graceUsed };
+  }
+
+  function activePauseWindow(habit, key) {
+    if (!habit.pauseWindows) return null;
+    return habit.pauseWindows.find((w) => key >= w.from && key <= w.until) || null;
+  }
+
+  function weekOverlapsPause(habit, weekStart) {
+    if (!habit.pauseWindows) return false;
+    return weekDates(weekStart).some((d) => activePauseWindow(habit, dateKey(d)));
+  }
+
+  function resumeHabitNow(habit) {
+    const window = activePauseWindow(habit, todayKey());
+    if (!window) return;
+    const yesterday = dateKey(new Date(Date.now() - 86400000));
+    if (yesterday < window.from) {
+      habit.pauseWindows = habit.pauseWindows.filter((w) => w !== window);
+    } else {
+      window.until = yesterday;
+    }
+    persist();
+    renderAll();
   }
 
   function lastCheckinBeforeToday(habit) {
@@ -285,14 +308,38 @@
         <p class="today-date">${dateLabel}</p>
       </div>
       <p class="today-summary">${doneToday} of ${active.length} done today</p>
-      <div class="habit-list" id="today-list"></div>
+      <div id="today-list"></div>
       <button class="btn-secondary" id="add-habit-btn" style="width:100%;margin-top:14px;">+ Add habit</button>
     `;
 
-    const list = panel.querySelector('#today-list');
-    active.forEach((habit) => {
-      list.appendChild(renderHabitCard(habit));
-    });
+    const container = panel.querySelector('#today-list');
+    const anyGrouped = active.some((h) => h.timeOfDay);
+
+    if (!anyGrouped) {
+      const list = document.createElement('div');
+      list.className = 'habit-list';
+      active.forEach((habit) => list.appendChild(renderHabitCard(habit)));
+      container.appendChild(list);
+    } else {
+      const groups = [
+        { key: 'morning', label: 'Morning' },
+        { key: 'afternoon', label: 'Afternoon' },
+        { key: 'evening', label: 'Evening' },
+        { key: null, label: 'Anytime' },
+      ];
+      groups.forEach((g) => {
+        const inGroup = active.filter((h) => (h.timeOfDay || null) === g.key);
+        if (inGroup.length === 0) return;
+        const header = document.createElement('p');
+        header.className = 'today-group-label';
+        header.textContent = g.label;
+        container.appendChild(header);
+        const list = document.createElement('div');
+        list.className = 'habit-list';
+        inGroup.forEach((habit) => list.appendChild(renderHabitCard(habit)));
+        container.appendChild(list);
+      });
+    }
 
     panel.querySelector('#add-habit-btn').addEventListener('click', () => openHabitModal(null));
   }
@@ -301,6 +348,28 @@
     const card = document.createElement('div');
     card.className = 'habit-card';
     card.style.background = `color-mix(in srgb, var(--${habit.ramp}-fill) 55%, var(--surface))`;
+
+    const c0 = rampVars(habit.ramp);
+    const pauseWindow = activePauseWindow(habit, todayKey());
+    if (pauseWindow) {
+      card.innerHTML = `
+        <div class="habit-icon" style="background:${c0.fill};opacity:0.6;">${habit.icon}</div>
+        <div class="habit-info">
+          <p class="habit-name-row">${escapeHtml(habit.name)}</p>
+          <p class="habit-sub">⏸ Paused until ${formatDateKey(pauseWindow.until)}</p>
+        </div>
+      `;
+      const wrap = document.createElement('div');
+      wrap.appendChild(card);
+      const resumeBtn = document.createElement('button');
+      resumeBtn.type = 'button';
+      resumeBtn.textContent = 'Resume now';
+      resumeBtn.className = 'btn-text';
+      resumeBtn.style.cssText = 'display:block;margin:4px 0 0 86px;padding:0;font-size:12px;';
+      resumeBtn.addEventListener('click', () => resumeHabitNow(habit));
+      wrap.appendChild(resumeBtn);
+      return wrap;
+    }
 
     const weekStart = getWeekStart(new Date());
     const done = weeklyCount(habit, weekStart);
@@ -652,6 +721,7 @@
           ? habit.scheduleDays.map((d) => DAY_ABBR[d]).join('/')
           : `${habit.target}x / week`;
         const typeMeta = habit.type === 'avoid' ? 'Avoid · ' : '';
+        const pauseWindow = activePauseWindow(habit, todayKey());
         html += `
           <div class="habit-manage-row" data-id="${habit.id}">
             <div class="reorder-btns">
@@ -661,9 +731,14 @@
             <div class="habit-icon" style="background:${c.fill};width:32px;height:32px;font-size:15px;">${habit.icon}</div>
             <div class="habit-manage-info">
               <p class="habit-manage-name">${escapeHtml(habit.name)}</p>
-              <p class="habit-manage-meta">${typeMeta}${scheduleMeta}${habit.reminderTime ? ' · reminder ' + habit.reminderTime : ''}</p>
+              <p class="habit-manage-meta">${typeMeta}${scheduleMeta}${habit.reminderTime ? ' · reminder ' + habit.reminderTime : ''}${
+          pauseWindow ? ' · ⏸ paused' : ''
+        }</p>
             </div>
             <button class="btn-text edit-habit-btn">Edit</button>
+            <button class="btn-text ${pauseWindow ? 'resume-habit-btn' : 'pause-habit-btn'}">${
+          pauseWindow ? 'Resume' : 'Pause'
+        }</button>
             <button class="btn-text archive-habit-btn">Archive</button>
           </div>`;
       });
@@ -688,7 +763,8 @@
     html += `</div>
       <p id="storage-status" class="habit-sub" style="margin:20px 0 0;">Checking storage…</p>
       <button class="btn-secondary" id="export-btn" style="width:100%;margin-top:10px;">Copy data as JSON</button>
-      <button class="btn-secondary" id="import-btn" style="width:100%;margin-top:8px;">Import data from JSON</button>`;
+      <button class="btn-secondary" id="import-btn" style="width:100%;margin-top:8px;">Import data from JSON</button>
+      <button class="btn-secondary" id="settings-btn" style="width:100%;margin-top:8px;">⚙️ Settings</button>`;
 
     panel.innerHTML = html;
 
@@ -702,6 +778,7 @@
       });
     }
 
+    panel.querySelector('#settings-btn').addEventListener('click', () => openSettingsModal());
     panel.querySelector('#add-habit-btn-2').addEventListener('click', () => openHabitModal(null));
     panel.querySelector('#export-btn').addEventListener('click', () => {
       navigator.clipboard
@@ -727,6 +804,18 @@
       btn.addEventListener('click', (e) => {
         const id = e.target.closest('.habit-manage-row').dataset.id;
         openHabitModal(state.habits.find((h) => h.id === id));
+      });
+    });
+    panel.querySelectorAll('.pause-habit-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.target.closest('.habit-manage-row').dataset.id;
+        openPauseModal(state.habits.find((h) => h.id === id));
+      });
+    });
+    panel.querySelectorAll('.resume-habit-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.target.closest('.habit-manage-row').dataset.id;
+        resumeHabitNow(state.habits.find((h) => h.id === id));
       });
     });
     panel.querySelectorAll('.archive-habit-btn').forEach((btn) => {
@@ -813,7 +902,7 @@
     const usedGraceMonths = new Set();
     while (cursor <= end && iterations < 1000) {
       const count = weeklyCount(habit, cursor);
-      if (count >= habit.target) {
+      if (count >= habit.target || weekOverlapsPause(habit, cursor)) {
         current++;
         if (current > longest) longest = current;
       } else {
@@ -849,7 +938,7 @@
     while (cursor <= end && iterations < 1000) {
       const count = weeklyCount(habit, cursor);
       let met = false;
-      if (count >= habit.target) {
+      if (count >= habit.target || weekOverlapsPause(habit, cursor)) {
         current++;
         met = true;
       } else {
@@ -888,6 +977,11 @@
     const cursor = new Date(start);
     let iterations = 0;
     while (cursor <= end && iterations < 1000) {
+      if (weekOverlapsPause(habit, cursor)) {
+        cursor.setDate(cursor.getDate() + 7);
+        iterations++;
+        continue; // paused weeks don't count for or against a perfect month
+      }
       const monthKey = `${cursor.getFullYear()}-${cursor.getMonth()}`;
       const met = weeklyCount(habit, cursor) >= habit.target;
       if (!months[monthKey]) months[monthKey] = { total: 0, allMet: true };
@@ -1187,6 +1281,19 @@
             </div>
           </div>
           <div class="form-group">
+            <label>Time of day (optional)</label>
+            <div class="freq-options" id="time-of-day-options">
+              ${['', 'morning', 'afternoon', 'evening']
+                .map(
+                  (t) =>
+                    `<button type="button" class="freq-chip time-chip ${
+                      (draft.timeOfDay || '') === t ? 'selected' : ''
+                    }" data-time="${t}">${t ? t[0].toUpperCase() + t.slice(1) : 'Any'}</button>`
+                )
+                .join('')}
+            </div>
+          </div>
+          <div class="form-group">
             <label>Schedule</label>
             <div class="freq-options" id="schedule-mode-options">
               <button type="button" class="freq-chip schedule-mode-chip ${!draft.scheduleDays ? 'selected' : ''}" data-mode="count">Any days/week</button>
@@ -1257,6 +1364,15 @@
         root.querySelectorAll('.type-chip').forEach((c) => c.classList.remove('selected'));
         chip.classList.add('selected');
         selectedType = chip.dataset.type;
+      });
+    });
+
+    let selectedTimeOfDay = draft.timeOfDay || '';
+    root.querySelectorAll('.time-chip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        root.querySelectorAll('.time-chip').forEach((c) => c.classList.remove('selected'));
+        chip.classList.add('selected');
+        selectedTimeOfDay = chip.dataset.time;
       });
     });
 
@@ -1357,6 +1473,7 @@
         const h = state.habits.find((x) => x.id === existingHabit.id);
         h.name = name;
         h.type = selectedType;
+        h.timeOfDay = selectedTimeOfDay || null;
         h.target = finalTarget;
         h.scheduleDays = scheduleDays;
         h.reminderTime = reminderTime;
@@ -1368,6 +1485,7 @@
           id: 'h_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
           name,
           type: selectedType,
+          timeOfDay: selectedTimeOfDay || null,
           icon: selectedIcon,
           ramp: selectedRamp,
           target: finalTarget,
@@ -1393,6 +1511,105 @@
 
   function closeModal() {
     document.getElementById('modal-root').innerHTML = '';
+  }
+
+  // ---------- Settings modal ----------
+
+  function openSettingsModal() {
+    const root = document.getElementById('modal-root');
+    state.settings = state.settings || {};
+    const remindersOn = state.settings.notificationsEnabled !== false;
+    const recapOn = state.settings.weeklyRecapEnabled !== false;
+
+    root.innerHTML = `
+      <div class="modal-overlay" id="modal-overlay">
+        <div class="modal">
+          <h2>Settings</h2>
+          <div class="form-group">
+            <label class="settings-toggle-row">
+              <input type="checkbox" id="setting-reminders" ${remindersOn ? 'checked' : ''} />
+              <span>Daily habit reminders</span>
+            </label>
+          </div>
+          <div class="form-group">
+            <label class="settings-toggle-row">
+              <input type="checkbox" id="setting-recap" ${recapOn ? 'checked' : ''} />
+              <span>Weekly recap (Sunday 8pm)</span>
+            </label>
+          </div>
+          <div class="modal-actions">
+            <button class="btn-primary" id="modal-close-settings" style="width:100%;">Done</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    root.querySelector('#modal-overlay').addEventListener('click', (e) => {
+      if (e.target.id === 'modal-overlay') closeModal();
+    });
+    root.querySelector('#modal-close-settings').addEventListener('click', closeModal);
+
+    root.querySelector('#setting-reminders').addEventListener('change', (e) => {
+      state.settings.notificationsEnabled = e.target.checked;
+      persist();
+    });
+    root.querySelector('#setting-recap').addEventListener('change', (e) => {
+      state.settings.weeklyRecapEnabled = e.target.checked;
+      persist();
+    });
+  }
+
+  // ---------- Pause modal ----------
+
+  function openPauseModal(habit) {
+    const root = document.getElementById('modal-root');
+    const today = todayKey();
+    const weekLater = dateKey(new Date(Date.now() + 7 * 86400000));
+
+    root.innerHTML = `
+      <div class="modal-overlay" id="modal-overlay">
+        <div class="modal">
+          <h2>Pause ${escapeHtml(habit.name)}</h2>
+          <p class="habit-sub" style="margin:-8px 0 14px;">Paused days won't break your streak or send reminders.</p>
+          <div class="form-group">
+            <label for="pause-from">From</label>
+            <input type="date" id="pause-from" value="${today}" />
+          </div>
+          <div class="form-group">
+            <label for="pause-until">Until</label>
+            <input type="date" id="pause-until" value="${weekLater}" />
+          </div>
+          <p class="error-text" id="pause-error" style="display:none;">End date must be on or after the start date.</p>
+          <div class="modal-actions">
+            <button class="btn-secondary" id="modal-cancel">Cancel</button>
+            <button class="btn-primary" id="modal-save-pause">Pause</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    root.querySelector('#modal-cancel').addEventListener('click', closeModal);
+    root.querySelector('#modal-overlay').addEventListener('click', (e) => {
+      if (e.target.id === 'modal-overlay') closeModal();
+    });
+
+    root.querySelector('#modal-save-pause').addEventListener('click', () => {
+      const from = root.querySelector('#pause-from').value;
+      const until = root.querySelector('#pause-until').value;
+      const errorEl = root.querySelector('#pause-error');
+      if (!from || !until || until < from) {
+        errorEl.style.display = 'block';
+        return;
+      }
+      errorEl.style.display = 'none';
+
+      habit.pauseWindows = habit.pauseWindows || [];
+      habit.pauseWindows.push({ from, until });
+      persist();
+      closeModal();
+      renderAll();
+      showToast(`${habit.name} paused until ${formatDateKey(until)}.`);
+    });
   }
 
   // ---------- Backfill note modal ----------
