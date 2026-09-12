@@ -24,120 +24,12 @@ import {
   mostMentionedNote,
   mostConsistentDay,
 } from './habit-stats.js';
+import { state, uiState, expandedNotesFor, expandedInsightFor, expandedMilestoneFor, loadState, persist, replaceState } from './state.js';
+import { showToast, ringSvg, rampVars, escapeHtml, miniWeekStripHtml } from './ui-utils.js';
+import { toggleCheckin, moveHabit, resumeHabitNow, setRenderCallbacks } from './actions.js';
 
 (function () {
   'use strict';
-
-  let state = { habits: [], settings: { notificationsEnabled: true } };
-  let currentTab = 'today';
-  let openNoteHabitId = null;
-  let weekViewMode = 'week';
-  let expandedNotesFor = new Set();
-  let expandedInsightFor = new Set();
-  let expandedMilestoneFor = new Set();
-
-  // ---------- persistence ----------
-
-  async function loadState() {
-    try {
-      const data = await window.api.loadData();
-      state = data && data.habits ? data : { habits: [], settings: { notificationsEnabled: true } };
-    } catch (err) {
-      console.error('Load failed', err);
-      showToast("Couldn't load your data. Starting fresh.");
-      state = { habits: [], settings: { notificationsEnabled: true } };
-    }
-    migrateNoteFields();
-  }
-
-  function migrateNoteFields() {
-    state.habits.forEach((habit) => {
-      habit.dayNotes = habit.dayNotes || {};
-      if (!habit.checkins) return;
-      Object.keys(habit.checkins).forEach((k) => {
-        const entry = habit.checkins[k];
-        if (!entry) return;
-        if (!entry.notes && entry.note) {
-          entry.notes = [entry.note];
-        }
-        if (entry.notes && entry.notes.length && !(habit.dayNotes[k] && habit.dayNotes[k].length)) {
-          habit.dayNotes[k] = entry.notes.slice();
-        }
-        delete entry.note;
-        delete entry.notes;
-      });
-    });
-  }
-
-  async function persist() {
-    try {
-      const ok = await window.api.saveData(state);
-      if (!ok) showToast("Couldn't save — try again.");
-    } catch (err) {
-      console.error('Save failed', err);
-      showToast("Couldn't save — try again.");
-    }
-  }
-
-  function resumeHabitNow(habit) {
-    const window = activePauseWindow(habit, todayKey());
-    if (!window) return;
-    const yesterday = dateKey(new Date(Date.now() - 86400000));
-    if (yesterday < window.from) {
-      habit.pauseWindows = habit.pauseWindows.filter((w) => w !== window);
-    } else {
-      window.until = yesterday;
-    }
-    persist();
-    renderAll();
-  }
-
-  // ---------- toast ----------
-
-  let toastTimer = null;
-  function showToast(message, options) {
-    const celebratory = options && options.celebratory;
-    let el = document.getElementById('toast');
-    if (!el) {
-      el = document.createElement('div');
-      el.id = 'toast';
-      el.style.cssText =
-        'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);color:#fff;' +
-        'padding:10px 16px;border-radius:10px;font-size:13px;z-index:200;opacity:0;transition:opacity 0.2s ease, background 0.15s ease;max-width:320px;text-align:center;';
-      document.body.appendChild(el);
-    }
-    el.textContent = message;
-    el.style.background = celebratory ? 'var(--purple-mid)' : '#2C2C2A';
-    el.style.fontWeight = celebratory ? '600' : 'normal';
-    el.style.opacity = '1';
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(
-      () => {
-        el.style.opacity = '0';
-      },
-      celebratory ? 3600 : 2600
-    );
-  }
-
-  // ---------- SVG ring ----------
-
-  function ringSvg(pct, midColor, fillColor) {
-    const r = 26, c = 2 * Math.PI * r;
-    const offset = c * (1 - Math.min(pct, 1));
-    return `<svg width="64" height="64" viewBox="0 0 64 64" style="transform: rotate(-90deg);">
-      <circle cx="32" cy="32" r="${r}" fill="none" stroke="${fillColor}" stroke-width="6"></circle>
-      <circle cx="32" cy="32" r="${r}" fill="none" stroke="${midColor}" stroke-width="6" stroke-linecap="round"
-        stroke-dasharray="${c}" stroke-dashoffset="${offset}" style="transition: stroke-dashoffset 0.35s ease;"></circle>
-    </svg>`;
-  }
-
-  function rampVars(ramp) {
-    return {
-      fill: `var(--${ramp}-fill)`,
-      mid: `var(--${ramp}-mid)`,
-      text: `var(--${ramp}-text)`,
-    };
-  }
 
   // ---------- Today tab ----------
 
@@ -332,7 +224,7 @@ import {
     }
 
     if (checkedToday) {
-      if (openNoteHabitId === habit.id) {
+      if (uiState.openNoteHabitId === habit.id) {
         wrap.appendChild(renderNoteInput(habit));
       } else {
         const addNote = document.createElement('button');
@@ -341,7 +233,7 @@ import {
         addNote.className = 'btn-text';
         addNote.style.cssText = 'display:block;margin:4px 0 0 86px;padding:0;font-size:12px;';
         addNote.addEventListener('click', () => {
-          openNoteHabitId = habit.id;
+          uiState.openNoteHabitId = habit.id;
           renderToday();
         });
         wrap.appendChild(addNote);
@@ -377,7 +269,7 @@ import {
         habit.dayNotes[key] = habit.dayNotes[key] || [];
         habit.dayNotes[key].push(val);
       }
-      openNoteHabitId = null;
+      uiState.openNoteHabitId = null;
       persist();
       renderToday();
     };
@@ -388,7 +280,7 @@ import {
         commit();
       } else if (e.key === 'Escape') {
         committed = true;
-        openNoteHabitId = null;
+        uiState.openNoteHabitId = null;
         renderToday();
       }
     });
@@ -399,45 +291,6 @@ import {
     return row;
   }
 
-  function toggleCheckin(habit, btnEl, isMini) {
-    const key = todayKey();
-    habit.checkins = habit.checkins || {};
-    const wasChecked = !!habit.checkins[key];
-
-    if (wasChecked) {
-      delete habit.checkins[key];
-      if (openNoteHabitId === habit.id) openNoteHabitId = null;
-    } else {
-      const gapKey = lastCheckinBeforeToday(habit);
-      habit.checkins[key] = { done: true, mini: !!isMini };
-      if (gapKey && daysBetween(gapKey, key) >= 10) {
-        habit._returnedAfterGap = true;
-      }
-      openNoteHabitId = habit.id;
-
-      const totalCheckins = Object.keys(habit.checkins).length;
-      habit._celebratedMilestones = habit._celebratedMilestones || [];
-      if (CHECKIN_MILESTONES.includes(totalCheckins) && !habit._celebratedMilestones.includes(totalCheckins)) {
-        habit._celebratedMilestones.push(totalCheckins);
-        showToast(`🎉 ${totalCheckins} check-ins for ${habit.name}!`, { celebratory: true });
-      }
-    }
-
-    if (btnEl) {
-      btnEl.style.transform = 'scale(0.85)';
-      setTimeout(() => {
-        btnEl.style.transform = 'scale(1.15)';
-      }, 90);
-      setTimeout(() => {
-        btnEl.style.transform = 'scale(1)';
-        renderToday();
-      }, 180);
-    } else {
-      renderToday();
-    }
-
-    persist();
-  }
 
   // ---------- Week tab ----------
 
@@ -452,17 +305,17 @@ import {
 
     const toggleHtml = `
       <div class="view-toggle">
-        <button type="button" class="view-toggle-btn ${weekViewMode === 'week' ? 'active' : ''}" data-mode="week">Week</button>
-        <button type="button" class="view-toggle-btn ${weekViewMode === 'month' ? 'active' : ''}" data-mode="month">Month</button>
+        <button type="button" class="view-toggle-btn ${uiState.weekViewMode === 'week' ? 'active' : ''}" data-mode="week">Week</button>
+        <button type="button" class="view-toggle-btn ${uiState.weekViewMode === 'month' ? 'active' : ''}" data-mode="month">Month</button>
       </div>
     `;
 
-    const body = weekViewMode === 'month' ? renderMonthGridHtml(active) : renderWeekGridHtml(active);
+    const body = uiState.weekViewMode === 'month' ? renderMonthGridHtml(active) : renderWeekGridHtml(active);
     panel.innerHTML = toggleHtml + body;
 
     panel.querySelectorAll('.view-toggle-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
-        weekViewMode = btn.dataset.mode;
+        uiState.weekViewMode = btn.dataset.mode;
         renderWeek();
       });
     });
@@ -710,37 +563,6 @@ import {
         renderAll();
       });
     });
-  }
-
-  function moveHabit(id, direction) {
-    const active = state.habits.filter((h) => !h.archived);
-    const posInActive = active.findIndex((h) => h.id === id);
-    const swapPos = posInActive + direction;
-    if (posInActive === -1 || swapPos < 0 || swapPos >= active.length) return;
-    const otherId = active[swapPos].id;
-
-    const idxA = state.habits.findIndex((h) => h.id === id);
-    const idxB = state.habits.findIndex((h) => h.id === otherId);
-    [state.habits[idxA], state.habits[idxB]] = [state.habits[idxB], state.habits[idxA]];
-
-    persist();
-    renderAll();
-  }
-
-  function miniWeekStripHtml(habit, c) {
-    const weekStart = getWeekStart(new Date());
-    const dates = weekDates(weekStart);
-    const todayStr = todayKey();
-    let html = '<div class="mini-week-strip">';
-    dates.forEach((d) => {
-      const key = dateKey(d);
-      const done = !!(habit.checkins && habit.checkins[key]);
-      const isFuture = key > todayStr;
-      const style = done ? `background:${c.mid};border-color:${c.mid};` : isFuture ? 'opacity:0.35;' : '';
-      html += `<div class="mini-week-dot" style="${style}"></div>`;
-    });
-    html += '</div>';
-    return html;
   }
 
   // ---------- Insights tab ----------
@@ -1431,11 +1253,10 @@ import {
       const ok = window.confirm('This will replace all your current habits and history. Continue?');
       if (!ok) return;
 
-      state = {
+      replaceState({
         habits: parsed.habits,
         settings: parsed.settings || { notificationsEnabled: true },
-      };
-      migrateNoteFields();
+      });
       persist();
       closeModal();
       renderAll();
@@ -1445,21 +1266,10 @@ import {
     setTimeout(() => root.querySelector('#import-json').focus(), 30);
   }
 
-  // ---------- utils ----------
-
-  function escapeHtml(str) {
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
-  }
-
   // ---------- tab switching ----------
 
   function switchTab(tab) {
-    currentTab = tab;
+    uiState.currentTab = tab;
     document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
     document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === `tab-${tab}`));
     renderAll();
@@ -1476,6 +1286,7 @@ import {
   // ---------- init ----------
 
   async function init() {
+    setRenderCallbacks({ renderToday, renderAll });
     await loadState();
     document.querySelectorAll('.tab-btn').forEach((btn) => {
       btn.addEventListener('click', () => switchTab(btn.dataset.tab));
