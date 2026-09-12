@@ -54,6 +54,23 @@ export function toggleCheckin(habit, btnEl, isMini) {
   persist();
 }
 
+export function toggleCheckinForDate(habit, dateKey) {
+  habit.checkins = habit.checkins || {};
+  if (habit.checkins[dateKey]) {
+    delete habit.checkins[dateKey];
+  } else {
+    habit.checkins[dateKey] = { done: true, mini: false };
+    const totalCheckins = Object.keys(habit.checkins).length;
+    habit._celebratedMilestones = habit._celebratedMilestones || [];
+    if (CHECKIN_MILESTONES.includes(totalCheckins) && !habit._celebratedMilestones.includes(totalCheckins)) {
+      habit._celebratedMilestones.push(totalCheckins);
+      showToast(`🎉 ${totalCheckins} check-ins for ${habit.name}!`, { celebratory: true });
+    }
+  }
+  persist();
+  _renderAll();
+}
+
 export function moveHabit(id, direction) {
   const active = state.habits.filter((h) => !h.archived);
   const posInActive = active.findIndex((h) => h.id === id);

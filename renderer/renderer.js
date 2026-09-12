@@ -26,7 +26,7 @@ import {
 } from './habit-stats.js';
 import { state, uiState, expandedNotesFor, expandedInsightFor, expandedMilestoneFor, loadState, persist, replaceState } from './state.js';
 import { showToast, ringSvg, rampVars, escapeHtml, miniWeekStripHtml } from './ui-utils.js';
-import { toggleCheckin, moveHabit, resumeHabitNow, setRenderCallbacks } from './actions.js';
+import { toggleCheckin, toggleCheckinForDate, moveHabit, resumeHabitNow, setRenderCallbacks } from './actions.js';
 
 (function () {
   'use strict';
@@ -320,10 +320,31 @@ import { toggleCheckin, moveHabit, resumeHabitNow, setRenderCallbacks } from './
       });
     });
 
+    const prevMonthBtn = panel.querySelector('#month-prev');
+    if (prevMonthBtn) {
+      prevMonthBtn.addEventListener('click', () => {
+        uiState.monthOffset -= 1;
+        renderWeek();
+      });
+    }
+    const nextMonthBtn = panel.querySelector('#month-next');
+    if (nextMonthBtn) {
+      nextMonthBtn.addEventListener('click', () => {
+        if (uiState.monthOffset < 0) uiState.monthOffset += 1;
+        renderWeek();
+      });
+    }
+
     panel.querySelectorAll('.day-dot-clickable').forEach((dot) => {
       dot.addEventListener('click', () => {
         const habit = state.habits.find((h) => h.id === dot.dataset.habitId);
-        if (habit) openDayNoteModal(habit, dot.dataset.dateKey);
+        if (!habit) return;
+        const key = dot.dataset.dateKey;
+        if (habit.checkins && habit.checkins[key]) {
+          openDayNoteModal(habit, key);
+        } else {
+          toggleCheckinForDate(habit, key);
+        }
       });
     });
   }
@@ -347,6 +368,8 @@ import { toggleCheckin, moveHabit, resumeHabitNow, setRenderCallbacks } from './
         const done = !!entry;
         const notes = (done && habit.dayNotes && habit.dayNotes[key]) || [];
         const isFuture = key > todayStr;
+        const isPast = key < todayStr;
+        const interactive = done || isPast;
         const style = done
           ? `background:${c.mid};border-color:${c.mid};`
           : isFuture
@@ -354,8 +377,8 @@ import { toggleCheckin, moveHabit, resumeHabitNow, setRenderCallbacks } from './
           : '';
         html += `<div class="week-day">
           <div class="week-day-label">${dayLabels[i]}</div>
-          <div class="week-day-dot ${done ? 'day-dot-clickable' : ''}" style="${style}" ${
-          done ? `data-habit-id="${habit.id}" data-date-key="${key}"` : ''
+          <div class="week-day-dot ${interactive ? 'day-dot-clickable' : ''}" style="${style}" ${
+          interactive ? `data-habit-id="${habit.id}" data-date-key="${key}"` : ''
         } ${notes.length ? `title="${escapeHtml(notes.join(' · '))}"` : ''}></div>
         </div>`;
       });
@@ -367,15 +390,22 @@ import { toggleCheckin, moveHabit, resumeHabitNow, setRenderCallbacks } from './
 
   function renderMonthGridHtml(active) {
     const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth();
+    const target = new Date(now.getFullYear(), now.getMonth() + uiState.monthOffset, 1);
+    const year = target.getFullYear();
+    const month = target.getMonth();
     const totalDays = new Date(year, month + 1, 0).getDate();
     const todayStr = todayKey();
-    const monthLabel = now.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    const monthLabel = target.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
     const dayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
     const leadingBlanks = (new Date(year, month, 1).getDay() + 6) % 7;
 
-    let html = `<p class="today-summary">${monthLabel}</p>`;
+    let html = `<div class="month-nav">
+      <button type="button" class="month-nav-btn" id="month-prev" aria-label="Previous month">‹</button>
+      <p class="today-summary" style="margin:0;">${monthLabel}</p>
+      <button type="button" class="month-nav-btn" id="month-next" aria-label="Next month" ${
+        uiState.monthOffset >= 0 ? 'disabled' : ''
+      }>›</button>
+    </div>`;
 
     active.forEach((habit) => {
       const c = rampVars(habit.ramp);
@@ -398,16 +428,18 @@ import { toggleCheckin, moveHabit, resumeHabitNow, setRenderCallbacks } from './
         const done = !!entry;
         const notes = (done && habit.dayNotes && habit.dayNotes[key]) || [];
         const isFuture = key > todayStr;
+        const isPast = key < todayStr;
+        const interactive = done || isPast;
         const style = done
-          ? `background:${c.mid};border-color:${c.mid};`
+          ? `background:${c.mid};border-color:${c.mid};color:#fff;`
           : isFuture
           ? 'opacity:0.4;'
           : '';
         const dateLabel = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
         const title = notes.length ? `${dateLabel}: ${notes.join(' · ')}` : dateLabel;
-        html += `<div class="month-day-dot ${done ? 'day-dot-clickable' : ''}" style="${style}" ${
-          done ? `data-habit-id="${habit.id}" data-date-key="${key}"` : ''
-        } title="${escapeHtml(title)}"></div>`;
+        html += `<div class="month-day-dot ${interactive ? 'day-dot-clickable' : ''}" style="${style}" ${
+          interactive ? `data-habit-id="${habit.id}" data-date-key="${key}"` : ''
+        } title="${escapeHtml(title)}">${d}</div>`;
       }
 
       html += `</div></div>`;
@@ -475,9 +507,7 @@ import { toggleCheckin, moveHabit, resumeHabitNow, setRenderCallbacks } from './
 
     html += `</div>
       <p id="storage-status" class="habit-sub" style="margin:20px 0 0;">Checking storage…</p>
-      <button class="btn-secondary" id="export-btn" style="width:100%;margin-top:10px;">Copy data as JSON</button>
-      <button class="btn-secondary" id="import-btn" style="width:100%;margin-top:8px;">Import data from JSON</button>
-      <button class="btn-secondary" id="settings-btn" style="width:100%;margin-top:8px;">⚙️ Settings</button>`;
+      <button class="btn-secondary" id="settings-btn" style="width:100%;margin-top:10px;">⚙️ Settings</button>`;
 
     panel.innerHTML = html;
 
@@ -493,13 +523,6 @@ import { toggleCheckin, moveHabit, resumeHabitNow, setRenderCallbacks } from './
 
     panel.querySelector('#settings-btn').addEventListener('click', () => openSettingsModal());
     panel.querySelector('#add-habit-btn-2').addEventListener('click', () => openHabitModal(null));
-    panel.querySelector('#export-btn').addEventListener('click', () => {
-      navigator.clipboard
-        .writeText(JSON.stringify(state, null, 2))
-        .then(() => showToast('Copied your data to the clipboard.'))
-        .catch(() => showToast("Couldn't copy — try again."));
-    });
-    panel.querySelector('#import-btn').addEventListener('click', () => openImportModal());
 
     panel.querySelectorAll('.move-up-btn').forEach((btn) => {
       btn.addEventListener('click', (e) => {
@@ -1050,6 +1073,11 @@ import { toggleCheckin, moveHabit, resumeHabitNow, setRenderCallbacks } from './
               <span>Weekly recap (Sunday 8pm)</span>
             </label>
           </div>
+          <div class="form-group">
+            <label>Data</label>
+            <button class="btn-secondary" id="export-btn" style="width:100%;">Copy data as JSON</button>
+            <button class="btn-secondary" id="import-btn" style="width:100%;margin-top:8px;">Import data from JSON</button>
+          </div>
           <div class="modal-actions">
             <button class="btn-primary" id="modal-close-settings" style="width:100%;">Done</button>
           </div>
@@ -1070,6 +1098,13 @@ import { toggleCheckin, moveHabit, resumeHabitNow, setRenderCallbacks } from './
       state.settings.weeklyRecapEnabled = e.target.checked;
       persist();
     });
+    root.querySelector('#export-btn').addEventListener('click', () => {
+      navigator.clipboard
+        .writeText(JSON.stringify(state, null, 2))
+        .then(() => showToast('Copied your data to the clipboard.'))
+        .catch(() => showToast("Couldn't copy — try again."));
+    });
+    root.querySelector('#import-btn').addEventListener('click', () => openImportModal());
   }
 
   // ---------- Pause modal ----------
@@ -1138,6 +1173,7 @@ import { toggleCheckin, moveHabit, resumeHabitNow, setRenderCallbacks } from './
     const suggestions = habitNoteSuggestions(habit);
     const listId = `day-note-suggestions-${habit.id}`;
     const notes = (habit.dayNotes && habit.dayNotes[key]) || [];
+    const canUndo = key !== todayKey();
     const notesListHtml = notes.length
       ? notes
           .map(
@@ -1160,6 +1196,7 @@ import { toggleCheckin, moveHabit, resumeHabitNow, setRenderCallbacks } from './
               ${suggestions.map((s) => `<option value="${escapeHtml(s)}"></option>`).join('')}
             </datalist>
           </div>
+          ${canUndo ? `<button type="button" class="btn-text" id="modal-undo-checkin" style="display:block;margin:10px 0 0;padding:0;">Undo check-in</button>` : ''}
           <div class="modal-actions">
             <button class="btn-secondary" id="modal-cancel">Close</button>
             <button class="btn-primary" id="modal-save-day-note">Add note</button>
@@ -1172,6 +1209,13 @@ import { toggleCheckin, moveHabit, resumeHabitNow, setRenderCallbacks } from './
     root.querySelector('#modal-overlay').addEventListener('click', (e) => {
       if (e.target.id === 'modal-overlay') closeModal();
     });
+
+    if (canUndo) {
+      root.querySelector('#modal-undo-checkin').addEventListener('click', () => {
+        toggleCheckinForDate(habit, key);
+        closeModal();
+      });
+    }
 
     root.querySelectorAll('.note-delete-btn').forEach((delBtn) => {
       delBtn.addEventListener('click', () => {

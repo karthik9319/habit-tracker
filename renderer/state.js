@@ -10,6 +10,7 @@ export const uiState = {
   currentTab: 'today',
   openNoteHabitId: null,
   weekViewMode: 'week',
+  monthOffset: 0,
 };
 
 export const expandedNotesFor = new Set();
