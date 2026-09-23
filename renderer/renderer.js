@@ -26,7 +26,7 @@ import {
 } from './habit-stats.js';
 import { state, uiState, expandedNotesFor, expandedInsightFor, expandedMilestoneFor, loadState, persist, replaceState } from './state.js';
 import { showToast, ringSvg, rampVars, escapeHtml, miniWeekStripHtml } from './ui-utils.js';
-import { toggleCheckin, toggleCheckinForDate, moveHabit, resumeHabitNow, setRenderCallbacks } from './actions.js';
+import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabitNow, setRenderCallbacks } from './actions.js';
 
 (function () {
   'use strict';
@@ -240,7 +240,65 @@ import { toggleCheckin, toggleCheckinForDate, moveHabit, resumeHabitNow, setRend
       }
     }
 
+    if (isAvoid) {
+      if (uiState.openSlipHabitId === habit.id) {
+        wrap.appendChild(renderSlipInput(habit));
+      } else {
+        const todayHasSlip = !!(habit.slips && habit.slips[todayKeyStr]);
+        const slipLink = document.createElement('button');
+        slipLink.type = 'button';
+        slipLink.textContent = todayHasSlip ? '⚠️ Slip logged today · Undo' : '⚠️ Log a slip';
+        slipLink.className = 'btn-text';
+        slipLink.style.cssText = 'display:block;margin:4px 0 0 86px;padding:0;font-size:12px;';
+        slipLink.addEventListener('click', () => {
+          uiState.openSlipHabitId = todayHasSlip ? null : habit.id;
+          toggleSlip(habit, todayKeyStr);
+        });
+        wrap.appendChild(slipLink);
+      }
+    }
+
     return wrap;
+  }
+
+  function renderSlipInput(habit) {
+    const key = todayKey();
+    const row = document.createElement('div');
+    row.className = 'note-input-row';
+    row.innerHTML = `<input type="text" class="note-input" placeholder="Optional reason (e.g. stressful day)" />`;
+
+    const input = row.querySelector('.note-input');
+    let committed = false;
+
+    const commit = () => {
+      if (committed) return;
+      committed = true;
+      const val = input.value.trim();
+      if (val) {
+        habit.dayNotes = habit.dayNotes || {};
+        habit.dayNotes[key] = habit.dayNotes[key] || [];
+        habit.dayNotes[key].push(val);
+        persist();
+      }
+      uiState.openSlipHabitId = null;
+      renderToday();
+    };
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        commit();
+      } else if (e.key === 'Escape') {
+        committed = true;
+        uiState.openSlipHabitId = null;
+        renderToday();
+      }
+    });
+    input.addEventListener('blur', commit);
+
+    setTimeout(() => input.focus(), 30);
+
+    return row;
   }
 
   function renderNoteInput(habit) {
@@ -340,8 +398,11 @@ import { toggleCheckin, toggleCheckinForDate, moveHabit, resumeHabitNow, setRend
         const habit = state.habits.find((h) => h.id === dot.dataset.habitId);
         if (!habit) return;
         const key = dot.dataset.dateKey;
-        if (habit.checkins && habit.checkins[key]) {
+        const hasSlip = habit.slips && habit.slips[key];
+        if ((habit.checkins && habit.checkins[key]) || hasSlip) {
           openDayNoteModal(habit, key);
+        } else if (habit.type === 'avoid') {
+          openAvoidDayModal(habit, key);
         } else {
           toggleCheckinForDate(habit, key);
         }
@@ -366,10 +427,11 @@ import { toggleCheckin, toggleCheckinForDate, moveHabit, resumeHabitNow, setRend
         const key = dateKey(d);
         const entry = habit.checkins && habit.checkins[key];
         const done = !!entry;
+        const hasSlip = !!(habit.slips && habit.slips[key]);
         const notes = (done && habit.dayNotes && habit.dayNotes[key]) || [];
         const isFuture = key > todayStr;
         const isPast = key < todayStr;
-        const interactive = done || isPast;
+        const interactive = done || hasSlip || isPast;
         const style = done
           ? `background:${c.mid};border-color:${c.mid};`
           : isFuture
@@ -377,7 +439,7 @@ import { toggleCheckin, toggleCheckinForDate, moveHabit, resumeHabitNow, setRend
           : '';
         html += `<div class="week-day">
           <div class="week-day-label">${dayLabels[i]}</div>
-          <div class="week-day-dot ${interactive ? 'day-dot-clickable' : ''}" style="${style}" ${
+          <div class="week-day-dot ${interactive ? 'day-dot-clickable' : ''} ${hasSlip ? 'has-slip' : ''}" style="${style}" ${
           interactive ? `data-habit-id="${habit.id}" data-date-key="${key}"` : ''
         } ${notes.length ? `title="${escapeHtml(notes.join(' · '))}"` : ''}></div>
         </div>`;
@@ -426,10 +488,11 @@ import { toggleCheckin, toggleCheckinForDate, moveHabit, resumeHabitNow, setRend
         const key = dateKey(date);
         const entry = habit.checkins && habit.checkins[key];
         const done = !!entry;
+        const hasSlip = !!(habit.slips && habit.slips[key]);
         const notes = (done && habit.dayNotes && habit.dayNotes[key]) || [];
         const isFuture = key > todayStr;
         const isPast = key < todayStr;
-        const interactive = done || isPast;
+        const interactive = done || hasSlip || isPast;
         const style = done
           ? `background:${c.mid};border-color:${c.mid};color:#fff;`
           : isFuture
@@ -437,7 +500,7 @@ import { toggleCheckin, toggleCheckinForDate, moveHabit, resumeHabitNow, setRend
           : '';
         const dateLabel = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
         const title = notes.length ? `${dateLabel}: ${notes.join(' · ')}` : dateLabel;
-        html += `<div class="month-day-dot ${interactive ? 'day-dot-clickable' : ''}" style="${style}" ${
+        html += `<div class="month-day-dot ${interactive ? 'day-dot-clickable' : ''} ${hasSlip ? 'has-slip' : ''}" style="${style}" ${
           interactive ? `data-habit-id="${habit.id}" data-date-key="${key}"` : ''
         } title="${escapeHtml(title)}">${d}</div>`;
       }
@@ -1160,12 +1223,45 @@ import { toggleCheckin, toggleCheckinForDate, moveHabit, resumeHabitNow, setRend
     });
   }
 
+  // ---------- Avoid-habit day chooser (empty past/today day in Week/Month grids) ----------
+
+  function openAvoidDayModal(habit, key) {
+    const root = document.getElementById('modal-root');
+    root.innerHTML = `
+      <div class="modal-overlay" id="modal-overlay">
+        <div class="modal">
+          <h2>${habit.icon} ${escapeHtml(habit.name)}</h2>
+          <p class="habit-sub" style="margin:-8px 0 14px;">${formatDateKey(key)}</p>
+          <div class="modal-actions" style="flex-direction:column;gap:8px;">
+            <button class="btn-primary" id="modal-mark-clean" style="width:100%;">Mark clean</button>
+            <button class="btn-secondary" id="modal-log-slip" style="width:100%;">⚠️ Log a slip</button>
+            <button class="btn-text" id="modal-cancel" style="width:100%;">Cancel</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    root.querySelector('#modal-overlay').addEventListener('click', (e) => {
+      if (e.target.id === 'modal-overlay') closeModal();
+    });
+    root.querySelector('#modal-cancel').addEventListener('click', closeModal);
+    root.querySelector('#modal-mark-clean').addEventListener('click', () => {
+      toggleCheckinForDate(habit, key);
+      closeModal();
+    });
+    root.querySelector('#modal-log-slip').addEventListener('click', () => {
+      toggleSlip(habit, key);
+      openDayNoteModal(habit, key);
+    });
+  }
+
   // ---------- Backfill note modal ----------
 
   function openDayNoteModal(habit, key) {
     const root = document.getElementById('modal-root');
-    const entry = habit.checkins && habit.checkins[key];
-    if (!entry) {
+    const hasCheckin = !!(habit.checkins && habit.checkins[key]);
+    const hasSlip = !!(habit.slips && habit.slips[key]);
+    if (!hasCheckin && !hasSlip) {
       closeModal();
       return;
     }
@@ -1196,7 +1292,8 @@ import { toggleCheckin, toggleCheckinForDate, moveHabit, resumeHabitNow, setRend
               ${suggestions.map((s) => `<option value="${escapeHtml(s)}"></option>`).join('')}
             </datalist>
           </div>
-          ${canUndo ? `<button type="button" class="btn-text" id="modal-undo-checkin" style="display:block;margin:10px 0 0;padding:0;">Undo check-in</button>` : ''}
+          ${canUndo && hasCheckin ? `<button type="button" class="btn-text" id="modal-undo-checkin" style="display:block;margin:10px 0 0;padding:0;">Undo check-in</button>` : ''}
+          ${hasSlip ? `<p class="habit-sub" style="margin:10px 0 0;">⚠️ Slip logged</p><button type="button" class="btn-text" id="modal-undo-slip" style="display:block;margin:2px 0 0;padding:0;">Undo slip</button>` : ''}
           <div class="modal-actions">
             <button class="btn-secondary" id="modal-cancel">Close</button>
             <button class="btn-primary" id="modal-save-day-note">Add note</button>
@@ -1210,9 +1307,15 @@ import { toggleCheckin, toggleCheckinForDate, moveHabit, resumeHabitNow, setRend
       if (e.target.id === 'modal-overlay') closeModal();
     });
 
-    if (canUndo) {
+    if (canUndo && hasCheckin) {
       root.querySelector('#modal-undo-checkin').addEventListener('click', () => {
         toggleCheckinForDate(habit, key);
+        closeModal();
+      });
+    }
+    if (hasSlip) {
+      root.querySelector('#modal-undo-slip').addEventListener('click', () => {
+        toggleSlip(habit, key);
         closeModal();
       });
     }

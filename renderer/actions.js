@@ -71,6 +71,17 @@ export function toggleCheckinForDate(habit, dateKey) {
   _renderAll();
 }
 
+export function toggleSlip(habit, dateKey) {
+  habit.slips = habit.slips || {};
+  if (habit.slips[dateKey]) {
+    delete habit.slips[dateKey];
+  } else {
+    habit.slips[dateKey] = true;
+  }
+  persist();
+  _renderAll();
+}
+
 export function moveHabit(id, direction) {
   const active = state.habits.filter((h) => !h.archived);
   const posInActive = active.findIndex((h) => h.id === id);

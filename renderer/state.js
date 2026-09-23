@@ -9,6 +9,7 @@ export let state = { habits: [], settings: { notificationsEnabled: true } };
 export const uiState = {
   currentTab: 'today',
   openNoteHabitId: null,
+  openSlipHabitId: null,
   weekViewMode: 'week',
   monthOffset: 0,
 };
