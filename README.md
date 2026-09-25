@@ -8,13 +8,13 @@ one day never resets you to zero.
 
 - **Flexible weekly targets** (1x–7x per week), or **specific scheduled days** (e.g. Mon/Wed/Fri) if you'd rather commit to a fixed pattern than a raw count
 - **Build or avoid habits** — track a habit you're building, or one you're trying to quit ("clean days" instead of check-ins)
-- **Weekly momentum streak** (🔥) — counts consecutive weeks you hit your target, not consecutive days
+- **Weekly momentum streak** (🔥) — tracks momentum across completed weeks, with one gentle grace week per month and no penalty for the unfinished current week
 - **Minimum viable fallback** — define a smaller version of a habit (e.g. "Read 1 page") that still counts
-- **Today / Week / Habits / Insights / Milestones tabs** — quick check-in, a week or month grid per habit, habit management, a gentle non-judgmental summary, and check-in/streak/perfect-month milestone badges
+- **Today / History / Insights / Habits tabs** — quick check-in, accessible week and month editing, useful progress patterns with integrated achievements, and habit management
 - **Time-of-day grouping** — tag a habit Morning/Afternoon/Evening and the Today tab clusters it accordingly (handy for e.g. splitting a routine into an AM and PM habit)
-- **Backfill and correct past check-ins** — the Week tab's grid and the Month view (with prev/next navigation to any past month) let you fill in a day you forgot, or undo a mistaken check-in, without opening up unlimited future dates
+- **Backfill and correct check-ins** — History's week grid and single-habit month calendar let you update today or any past day without opening future dates
 - **Per-day notes**, with autosuggested phrases pulled from your own past notes
-- **Vacation pause** — pause a habit for a date range so travel or illness doesn't break its streak or send reminders
+- **Vacation pause** — pause a habit for a date range so travel or illness prorates that week's target, preserves momentum fairly, and suppresses reminders
 - **Per-habit reminders** with rotating, low-pressure notification copy, and a snooze option (macOS), plus an optional weekly recap notification (Sunday 8pm)
 - **Menu bar tray icon** showing today's progress, with one-click check-in per habit
 - **Global quick-check window** (⌘/Ctrl+Shift+H) — a small always-on-top popup to check off habits without opening the main window
@@ -65,7 +65,7 @@ habit-tracker/
 ├── renderer/
 │   ├── index.html          App shell with tab structure
 │   ├── style.css           Playful, colorful styling
-│   ├── renderer.js         Tab rendering and DOM wiring (Today/Week/Habits/Insights/Milestones, modals)
+│   ├── renderer.js         Tab rendering and DOM wiring (Today/History/Insights/Habits, achievements, modals)
 │   ├── actions.js          State-mutating actions (check-in, reorder, resume from pause)
 │   ├── state.js             Persisted app state + transient UI state, load/save/replace
 │   ├── ui-utils.js          Toast, SVG ring, color-ramp helpers, escaping
@@ -107,7 +107,7 @@ Each habit is stored as:
 }
 ```
 
-`scheduleDays` (an array of weekday indices, Monday = 0) is set instead of `target` when a
+`scheduleDays` (an array of JavaScript weekday indices, Sunday = 0) is set instead of `target` when a
 habit uses "specific days" scheduling rather than a raw weekly count. `type` is `"build"` or
 `"avoid"`. Settings (`notificationsEnabled`, `weeklyRecapEnabled`) are stored alongside
 `habits` at the top level of the saved file.

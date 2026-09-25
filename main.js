@@ -125,8 +125,7 @@ function createWindow() {
 }
 
 function todayKey() {
-  const d = new Date();
-  return d.toISOString().slice(0, 10);
+  return dateKeyMain(new Date());
 }
 
 function toggleHabitCheckin(habitId) {
@@ -187,9 +186,11 @@ function buildTrayMenu() {
   const data = loadData();
   const todayStr = todayKey();
   const active = data.habits.filter((h) => !h.archived);
-  const doneCount = active.filter((h) => h.checkins && h.checkins[todayStr]).length;
+  const available = active.filter((h) => !isPausedOn(h, todayStr));
+  const paused = active.filter((h) => isPausedOn(h, todayStr));
+  const doneCount = available.filter((h) => h.checkins && h.checkins[todayStr]).length;
 
-  const habitItems = active.map((h) => {
+  const habitItems = available.map((h) => {
     const done = !!(h.checkins && h.checkins[todayStr]);
     return {
       label: `${done ? '✓' : '○'}  ${h.name}`,
@@ -198,9 +199,17 @@ function buildTrayMenu() {
   });
 
   const menu = Menu.buildFromTemplate([
-    { label: active.length ? `${doneCount} of ${active.length} done today` : 'No habits yet', enabled: false },
+    {
+      label: active.length
+        ? `${doneCount} of ${available.length} available done${paused.length ? ` · ${paused.length} paused` : ''}`
+        : 'No habits yet',
+      enabled: false,
+    },
     { type: 'separator' },
-    ...(habitItems.length ? habitItems : [{ label: 'Add a habit to get started', enabled: false }]),
+    ...(habitItems.length
+      ? habitItems
+      : [{ label: active.length ? 'Nothing available right now' : 'Add a habit to get started', enabled: false }]),
+    ...paused.map((h) => ({ label: `⏸  ${h.name}`, enabled: false })),
     { type: 'separator' },
     {
       label: 'Open Habit Tracker',
@@ -216,7 +225,7 @@ function buildTrayMenu() {
   ]);
 
   tray.setContextMenu(menu);
-  tray.setTitle(active.length ? `${doneCount}/${active.length}` : '');
+  tray.setTitle(active.length ? (available.length ? `${doneCount}/${available.length}` : '⏸') : '');
 }
 
 function isPausedOn(habit, key) {
@@ -231,6 +240,7 @@ function checkReminders() {
 
   const now = new Date();
   const hhmm = now.toTimeString().slice(0, 5); // "HH:MM"
+  let dataChanged = false;
 
   data.habits.forEach((habit) => {
     if (habit.archived || !habit.reminderTime) return;
@@ -246,6 +256,7 @@ function checkReminders() {
 
     if (habit.reminderTime === hhmm && habit._lastNotified !== todayKey()) {
       habit._lastNotified = todayKey();
+      dataChanged = true;
       const phrases =
         habit.type === 'avoid'
           ? [
@@ -284,7 +295,7 @@ function checkReminders() {
     }
   });
 
-  saveData(data);
+  if (dataChanged) saveData(data);
 }
 
 function getWeekStartKey(d) {
@@ -314,6 +325,24 @@ function weeklyCountForRecap(habit, weekStartKey) {
   return count;
 }
 
+function effectiveWeeklyTargetForRecap(habit, weekStartKey) {
+  const [y, m, d] = weekStartKey.split('-').map(Number);
+  const start = new Date(y, m - 1, d);
+  const dates = [];
+  for (let i = 0; i < 7; i++) {
+    const date = new Date(start);
+    date.setDate(date.getDate() + i);
+    dates.push(date);
+  }
+  const relevantDates = habit.scheduleDays
+    ? dates.filter((date) => habit.scheduleDays.includes(date.getDay()))
+    : dates;
+  const availableDates = relevantDates.filter((date) => !isPausedOn(habit, dateKeyMain(date)));
+  if (availableDates.length === 0) return 0;
+  if (habit.scheduleDays) return availableDates.length;
+  return Math.ceil(Math.max(1, Number(habit.target) || 1) * (availableDates.length / relevantDates.length));
+}
+
 function checkWeeklyRecap() {
   const data = loadData();
   if (data.settings.weeklyRecapEnabled === false) return;
@@ -330,7 +359,10 @@ function checkWeeklyRecap() {
   const active = data.habits.filter((h) => !h.archived);
   if (active.length === 0) return;
 
-  const hitCount = active.filter((h) => weeklyCountForRecap(h, weekStartKey) >= h.target).length;
+  const hitCount = active.filter((h) => {
+    const target = effectiveWeeklyTargetForRecap(h, weekStartKey);
+    return target === 0 || weeklyCountForRecap(h, weekStartKey) >= target;
+  }).length;
 
   data._lastRecapWeek = weekStartKey;
   saveData(data);

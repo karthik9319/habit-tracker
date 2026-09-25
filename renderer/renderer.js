@@ -7,12 +7,12 @@ import {
   ICON_CHOICES,
   RAMPS,
 } from './constants.js';
-import { dateKey, todayKey, getWeekStart, weekDates, daysBetween, formatDateKey } from './date-utils.js';
+import { dateKey, todayKey, getWeekStart, weekDates, formatDateKey } from './date-utils.js';
 import {
   weeklyCount,
   weeklyStreak,
   activePauseWindow,
-  weekOverlapsPause,
+  effectiveWeeklyTarget,
   lastCheckinBeforeToday,
   habitNoteSuggestions,
   assignIcon,
@@ -31,6 +31,52 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
 (function () {
   'use strict';
 
+  let modalReturnFocus = null;
+
+  function activateModal(root) {
+    const modal = root.querySelector('.modal');
+    if (!modal) return;
+    if (!modalReturnFocus) modalReturnFocus = document.activeElement;
+
+    const heading = modal.querySelector('h2');
+    if (heading) {
+      heading.id = 'active-modal-title';
+      modal.setAttribute('aria-labelledby', heading.id);
+    }
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('tabindex', '-1');
+
+    modal.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeModal();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const focusable = Array.from(
+        modal.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary')
+      ).filter((element) => element.offsetParent !== null);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    });
+
+    setTimeout(() => {
+      const first = modal.querySelector('input:not(:disabled), select:not(:disabled), textarea:not(:disabled), button:not(:disabled), summary');
+      if (first) first.focus();
+      else modal.focus();
+    }, 0);
+  }
+
   // ---------- Today tab ----------
 
   function renderToday() {
@@ -48,7 +94,9 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
       return;
     }
 
-    const doneToday = active.filter((h) => h.checkins && h.checkins[todayKey()]).length;
+    const availableToday = active.filter((h) => !activePauseWindow(h, todayKey()));
+    const pausedToday = active.length - availableToday.length;
+    const doneToday = availableToday.filter((h) => h.checkins && h.checkins[todayKey()]).length;
     const now = new Date();
     const hour = now.getHours();
     const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
@@ -59,7 +107,9 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
         <h2 class="today-greeting">${greeting}</h2>
         <p class="today-date">${dateLabel}</p>
       </div>
-      <p class="today-summary">${doneToday} of ${active.length} done today</p>
+      <p class="today-summary">${doneToday} of ${availableToday.length} available done today${
+        pausedToday ? ` · ${pausedToday} paused` : ''
+      }</p>
       <div id="today-list"></div>
       <button class="btn-secondary" id="add-habit-btn" style="width:100%;margin-top:14px;">+ Add habit</button>
     `;
@@ -125,9 +175,10 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
 
     const weekStart = getWeekStart(new Date());
     const done = weeklyCount(habit, weekStart);
+    const adjustedTarget = effectiveWeeklyTarget(habit, weekStart);
     const todayEntry = habit.checkins && habit.checkins[todayKey()];
     const checkedToday = !!todayEntry;
-    const pct = habit.target > 0 ? done / habit.target : 0;
+    const pct = adjustedTarget > 0 ? done / adjustedTarget : 1;
     const streakInfo = weeklyStreak(habit);
     const streak = streakInfo.count;
     const c = rampVars(habit.ramp);
@@ -161,8 +212,9 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
     const isAvoid = habit.type === 'avoid';
     const dayWord = isAvoid ? 'clean days' : habit.scheduleDays ? 'scheduled days' : null;
     const weekSubLabel = dayWord
-      ? `${done} of ${habit.target} ${dayWord} this week`
-      : `${done} of ${habit.target} this week`;
+      ? `${done} of ${adjustedTarget} ${dayWord} this week`
+      : `${done} of ${adjustedTarget} this week`;
+    const pauseAdjustment = adjustedTarget !== habit.target ? ' · adjusted for pause' : '';
     const scheduleLabel = habit.scheduleDays
       ? `<p class="habit-sub" style="margin-top:1px;">${habit.scheduleDays.map((d) => DAY_ABBR[d]).join(', ')}</p>`
       : '';
@@ -172,7 +224,7 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
       <div class="habit-icon" style="background:${c.fill};">${habit.icon}</div>
       <div class="habit-info">
         <p class="habit-name-row">${escapeHtml(habit.name)}${typeBadge}${streakBadge}</p>
-        <p class="habit-sub">${weekSubLabel}</p>
+        <p class="habit-sub">${weekSubLabel}${pauseAdjustment}</p>
         ${scheduleLabel}
         ${notesHtml}
       </div>
@@ -350,7 +402,7 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
   }
 
 
-  // ---------- Week tab ----------
+  // ---------- History tab ----------
 
   function renderWeek() {
     const panel = document.getElementById('tab-week');
@@ -362,9 +414,13 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
     }
 
     const toggleHtml = `
-      <div class="view-toggle">
-        <button type="button" class="view-toggle-btn ${uiState.weekViewMode === 'week' ? 'active' : ''}" data-mode="week">Week</button>
-        <button type="button" class="view-toggle-btn ${uiState.weekViewMode === 'month' ? 'active' : ''}" data-mode="month">Month</button>
+      <div class="view-toggle" role="group" aria-label="History range">
+        <button type="button" class="view-toggle-btn ${uiState.weekViewMode === 'week' ? 'active' : ''}" aria-pressed="${
+          uiState.weekViewMode === 'week'
+        }" data-mode="week">This week</button>
+        <button type="button" class="view-toggle-btn ${uiState.weekViewMode === 'month' ? 'active' : ''}" aria-pressed="${
+          uiState.weekViewMode === 'month'
+        }" data-mode="month">Month</button>
       </div>
     `;
 
@@ -393,6 +449,14 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
       });
     }
 
+    const habitSelect = panel.querySelector('#history-habit-select');
+    if (habitSelect) {
+      habitSelect.addEventListener('change', () => {
+        uiState.selectedHistoryHabitId = habitSelect.value;
+        renderWeek();
+      });
+    }
+
     panel.querySelectorAll('.day-dot-clickable').forEach((dot) => {
       dot.addEventListener('click', () => {
         const habit = state.habits.find((h) => h.id === dot.dataset.habitId);
@@ -413,35 +477,55 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
   function renderWeekGridHtml(active) {
     const weekStart = getWeekStart(new Date());
     const dates = weekDates(weekStart);
-    const dayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
     const todayStr = todayKey();
 
-    let html = `<p class="today-summary">Week of ${weekStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</p>`;
+    let html = `<div class="history-heading">
+      <div>
+        <p class="history-title">Week of ${weekStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</p>
+        <p class="habit-sub">Select any past or current day to update it.</p>
+      </div>
+    </div>${historyLegendHtml()}`;
 
     active.forEach((habit) => {
       const c = rampVars(habit.ramp);
+      const adjustedTarget = effectiveWeeklyTarget(habit, weekStart);
+      const count = weeklyCount(habit, weekStart);
       html += `<div class="week-habit-block">
-        <p class="week-habit-title"><span>${habit.icon}</span> ${escapeHtml(habit.name)}</p>
+        <div class="week-habit-heading">
+          <p class="week-habit-title"><span>${habit.icon}</span> ${escapeHtml(habit.name)}</p>
+          <span class="week-habit-progress">${count}/${adjustedTarget}</span>
+        </div>
         <div class="week-grid">`;
-      dates.forEach((d, i) => {
+      dates.forEach((d) => {
         const key = dateKey(d);
         const entry = habit.checkins && habit.checkins[key];
         const done = !!entry;
         const hasSlip = !!(habit.slips && habit.slips[key]);
-        const notes = (done && habit.dayNotes && habit.dayNotes[key]) || [];
+        const notes = (habit.dayNotes && habit.dayNotes[key]) || [];
+        const paused = !!activePauseWindow(habit, key);
         const isFuture = key > todayStr;
-        const isPast = key < todayStr;
-        const interactive = done || hasSlip || isPast;
+        const interactive = done || hasSlip || (!isFuture && !paused);
+        const isToday = key === todayStr;
+        const isMini = !!(entry && entry.mini);
+        const scheduled = !habit.scheduleDays || habit.scheduleDays.includes(d.getDay());
+        const status = hasSlip ? 'slip logged' : done ? (isMini ? 'minimum version complete' : 'complete') : paused ? 'paused' : 'not complete';
         const style = done
           ? `background:${c.mid};border-color:${c.mid};`
           : isFuture
           ? 'opacity:0.4;'
           : '';
+        const ariaLabel = `${habit.name}, ${d.toLocaleDateString(undefined, {
+          weekday: 'long', month: 'short', day: 'numeric'
+        })}: ${status}${notes.length ? `. ${notes.join('. ')}` : ''}`;
         html += `<div class="week-day">
-          <div class="week-day-label">${dayLabels[i]}</div>
-          <div class="week-day-dot ${interactive ? 'day-dot-clickable' : ''} ${hasSlip ? 'has-slip' : ''}" style="${style}" ${
-          interactive ? `data-habit-id="${habit.id}" data-date-key="${key}"` : ''
-        } ${notes.length ? `title="${escapeHtml(notes.join(' · '))}"` : ''}></div>
+          <div class="week-day-label">${d.toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 2)}<span>${d.getDate()}</span></div>
+          <button type="button" class="week-day-dot ${interactive ? 'day-dot-clickable' : ''} ${
+          hasSlip ? 'has-slip' : ''
+        } ${isToday ? 'is-today' : ''} ${paused ? 'is-paused' : ''} ${isMini ? 'is-mini' : ''} ${
+          !scheduled ? 'is-unscheduled' : ''
+        }" style="${style}" ${interactive ? `data-habit-id="${habit.id}" data-date-key="${key}"` : 'disabled'} aria-label="${escapeHtml(
+          ariaLabel
+        )}" title="${escapeHtml(ariaLabel)}">${notes.length ? '<span class="note-indicator" aria-hidden="true"></span>' : ''}</button>
         </div>`;
       });
       html += `</div></div>`;
@@ -458,57 +542,88 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
     const totalDays = new Date(year, month + 1, 0).getDate();
     const todayStr = todayKey();
     const monthLabel = target.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
-    const dayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+    const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     const leadingBlanks = (new Date(year, month, 1).getDay() + 6) % 7;
 
-    let html = `<div class="month-nav">
-      <button type="button" class="month-nav-btn" id="month-prev" aria-label="Previous month">‹</button>
-      <p class="today-summary" style="margin:0;">${monthLabel}</p>
-      <button type="button" class="month-nav-btn" id="month-next" aria-label="Next month" ${
-        uiState.monthOffset >= 0 ? 'disabled' : ''
-      }>›</button>
-    </div>`;
+    let selectedHabit = active.find((habit) => habit.id === uiState.selectedHistoryHabitId);
+    if (!selectedHabit) {
+      selectedHabit = active[0];
+      uiState.selectedHistoryHabitId = selectedHabit.id;
+    }
+    const c = rampVars(selectedHabit.ramp);
+    const monthPrefix = `${year}-${String(month + 1).padStart(2, '0')}`;
+    const monthCheckins = Object.keys(selectedHabit.checkins || {}).filter((key) => key.startsWith(monthPrefix)).length;
+    const monthSlips = Object.keys(selectedHabit.slips || {}).filter((key) => key.startsWith(monthPrefix)).length;
+    const summary = selectedHabit.type === 'avoid'
+      ? `${monthCheckins} clean day${monthCheckins === 1 ? '' : 's'}${monthSlips ? ` · ${monthSlips} slip${monthSlips === 1 ? '' : 's'}` : ''}`
+      : `${monthCheckins} check-in${monthCheckins === 1 ? '' : 's'}`;
 
-    active.forEach((habit) => {
-      const c = rampVars(habit.ramp);
-      html += `<div class="week-habit-block">
-        <p class="week-habit-title"><span>${habit.icon}</span> ${escapeHtml(habit.name)}</p>
-        <div class="month-grid">`;
+    let html = `<div class="history-heading month-history-heading">
+      <label class="history-habit-picker" for="history-habit-select">
+        <span>Habit</span>
+        <select id="history-habit-select">
+          ${active.map((habit) => `<option value="${habit.id}" ${habit.id === selectedHabit.id ? 'selected' : ''}>${habit.icon} ${escapeHtml(
+            habit.name
+          )}</option>`).join('')}
+        </select>
+      </label>
+      <div class="month-nav">
+        <button type="button" class="month-nav-btn" id="month-prev" aria-label="Previous month">‹</button>
+        <p class="history-title">${monthLabel}</p>
+        <button type="button" class="month-nav-btn" id="month-next" aria-label="Next month" ${
+          uiState.monthOffset >= 0 ? 'disabled' : ''
+        }>›</button>
+      </div>
+      <p class="habit-sub month-summary">${summary}</p>
+    </div>${historyLegendHtml()}
+    <div class="month-grid">`;
 
-      dayLabels.forEach((l) => {
-        html += `<div class="month-day-label">${l}</div>`;
-      });
-
-      for (let i = 0; i < leadingBlanks; i++) {
-        html += `<div class="month-day-empty"></div>`;
-      }
-
-      for (let d = 1; d <= totalDays; d++) {
-        const date = new Date(year, month, d);
-        const key = dateKey(date);
-        const entry = habit.checkins && habit.checkins[key];
-        const done = !!entry;
-        const hasSlip = !!(habit.slips && habit.slips[key]);
-        const notes = (done && habit.dayNotes && habit.dayNotes[key]) || [];
-        const isFuture = key > todayStr;
-        const isPast = key < todayStr;
-        const interactive = done || hasSlip || isPast;
-        const style = done
-          ? `background:${c.mid};border-color:${c.mid};color:#fff;`
-          : isFuture
-          ? 'opacity:0.4;'
-          : '';
-        const dateLabel = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-        const title = notes.length ? `${dateLabel}: ${notes.join(' · ')}` : dateLabel;
-        html += `<div class="month-day-dot ${interactive ? 'day-dot-clickable' : ''} ${hasSlip ? 'has-slip' : ''}" style="${style}" ${
-          interactive ? `data-habit-id="${habit.id}" data-date-key="${key}"` : ''
-        } title="${escapeHtml(title)}">${d}</div>`;
-      }
-
-      html += `</div></div>`;
+    dayLabels.forEach((label) => {
+      html += `<div class="month-day-label">${label}</div>`;
     });
 
+    for (let i = 0; i < leadingBlanks; i++) {
+      html += `<div class="month-day-empty"></div>`;
+    }
+
+    for (let day = 1; day <= totalDays; day++) {
+      const date = new Date(year, month, day);
+      const key = dateKey(date);
+      const entry = selectedHabit.checkins && selectedHabit.checkins[key];
+      const done = !!entry;
+      const hasSlip = !!(selectedHabit.slips && selectedHabit.slips[key]);
+      const notes = (selectedHabit.dayNotes && selectedHabit.dayNotes[key]) || [];
+      const paused = !!activePauseWindow(selectedHabit, key);
+      const isFuture = key > todayStr;
+      const interactive = done || hasSlip || (!isFuture && !paused);
+      const isToday = key === todayStr;
+      const isMini = !!(entry && entry.mini);
+      const scheduled = !selectedHabit.scheduleDays || selectedHabit.scheduleDays.includes(date.getDay());
+      const status = hasSlip ? 'slip logged' : done ? (isMini ? 'minimum version complete' : 'complete') : paused ? 'paused' : 'not complete';
+      const style = done ? `background:${c.mid};border-color:${c.mid};color:#fff;` : isFuture ? 'opacity:0.4;' : '';
+      const dateLabel = date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+      const ariaLabel = `${selectedHabit.name}, ${dateLabel}: ${status}${notes.length ? `. ${notes.join('. ')}` : ''}`;
+      html += `<button type="button" class="month-day-dot ${interactive ? 'day-dot-clickable' : ''} ${
+        hasSlip ? 'has-slip' : ''
+      } ${isToday ? 'is-today' : ''} ${paused ? 'is-paused' : ''} ${isMini ? 'is-mini' : ''} ${
+        !scheduled ? 'is-unscheduled' : ''
+      }" style="${style}" ${interactive ? `data-habit-id="${selectedHabit.id}" data-date-key="${key}"` : 'disabled'} aria-label="${escapeHtml(
+        ariaLabel
+      )}" title="${escapeHtml(ariaLabel)}"><span>${day}</span>${notes.length ? '<span class="note-indicator" aria-hidden="true"></span>' : ''}</button>`;
+    }
+
+    html += `</div>`;
+
     return html;
+  }
+
+  function historyLegendHtml() {
+    return `<div class="history-legend" aria-label="History legend">
+      <span><i class="legend-swatch is-complete"></i>Done</span>
+      <span><i class="legend-swatch has-slip"></i>Slip</span>
+      <span><i class="legend-swatch is-mini"></i>Minimum</span>
+      <span><i class="legend-swatch is-paused"></i>Paused</span>
+    </div>`;
   }
 
   // ---------- Habits management tab ----------
@@ -543,11 +658,13 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
           pauseWindow ? ' · ⏸ paused' : ''
         }</p>
             </div>
-            <button class="btn-text edit-habit-btn">Edit</button>
-            <button class="btn-text ${pauseWindow ? 'resume-habit-btn' : 'pause-habit-btn'}">${
-          pauseWindow ? 'Resume' : 'Pause'
-        }</button>
-            <button class="btn-text archive-habit-btn">Archive</button>
+            <div class="habit-manage-actions">
+              <button class="btn-text edit-habit-btn">Edit</button>
+              <button class="btn-text ${pauseWindow ? 'resume-habit-btn' : 'pause-habit-btn'}">${
+            pauseWindow ? 'Resume' : 'Pause'
+          }</button>
+              <button class="btn-text archive-habit-btn">Archive</button>
+            </div>
           </div>`;
       });
     }
@@ -562,8 +679,10 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
               <p class="habit-manage-name">${escapeHtml(habit.name)}</p>
               <p class="habit-manage-meta">Archived</p>
             </div>
-            <button class="btn-text restore-habit-btn">Restore</button>
-            <button class="btn-text delete-habit-btn">Delete</button>
+            <div class="habit-manage-actions">
+              <button class="btn-text restore-habit-btn">Restore</button>
+              <button class="btn-text delete-habit-btn">Delete</button>
+            </div>
           </div>`;
       });
     }
@@ -663,7 +782,7 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
     }
 
     const weekStart = getWeekStart(new Date());
-    let html = '';
+    let html = `<div class="section-heading"><h2>Your patterns</h2><p>Progress without judgment — look for what helps you return.</p></div>`;
 
     const returned = active.find((h) => h._returnedAfterGap);
     if (returned) {
@@ -674,6 +793,32 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
 
     active.forEach((habit) => {
       const done = weeklyCount(habit, weekStart);
+      const adjustedTarget = effectiveWeeklyTarget(habit, weekStart);
+      const previousWeekStart = new Date(weekStart);
+      previousWeekStart.setDate(previousWeekStart.getDate() - 7);
+      const previousDone = weeklyCount(habit, previousWeekStart);
+      const previousTarget = effectiveWeeklyTarget(habit, previousWeekStart);
+      const previousSummary = previousTarget === 0 ? 'paused' : `${previousDone}/${previousTarget}`;
+      let completedWeeks = 0;
+      let hitWeeks = 0;
+      for (let offset = 1; offset <= 4; offset++) {
+        const start = new Date(weekStart);
+        start.setDate(start.getDate() - offset * 7);
+        const target = effectiveWeeklyTarget(habit, start);
+        if (target === 0) continue;
+        completedWeeks++;
+        if (weeklyCount(habit, start) >= target) hitWeeks++;
+      }
+      const currentWeekKeys = new Set(weekDates(weekStart).map((date) => dateKey(date)));
+      const slipsThisWeek = Object.keys(habit.slips || {}).filter((key) => currentWeekKeys.has(key)).length;
+      const remaining = Math.max(0, adjustedTarget - done);
+      const paceText = adjustedTarget === 0
+        ? 'Paused for the rest of this week'
+        : remaining === 0
+        ? 'Weekly target reached'
+        : habit.type === 'avoid'
+        ? `${remaining} more clean day${remaining === 1 ? '' : 's'} to target${slipsThisWeek ? ` · ${slipsThisWeek} slip${slipsThisWeek === 1 ? '' : 's'}` : ''}`
+        : `${remaining} check-in${remaining === 1 ? '' : 's'} to reach your target`;
       const totalCheckins = habit.checkins ? Object.keys(habit.checkins).length : 0;
       const notes = recentHabitNotes(habit, 5);
       const notesHtml = notes.length
@@ -698,7 +843,7 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
         extraHtml += `<p class="habit-sub" style="margin-top:2px;">🔥 Longest streak: ${longest} week${longest === 1 ? '' : 's'}.</p>`;
       }
       if (consistentDay) {
-        extraHtml += `<p class="habit-sub" style="margin-top:2px;">📅 Most consistent on ${consistentDay.day}s.</p>`;
+        extraHtml += `<p class="habit-sub" style="margin-top:2px;">📅 Most common check-in day: ${consistentDay.day}.</p>`;
       }
       if (mostNote) {
         extraHtml += `<p class="habit-sub" style="margin-top:2px;">📝 Most mentioned: "${escapeHtml(mostNote.note)}" (${mostNote.count}×).</p>`;
@@ -709,6 +854,9 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
         ? `<p class="habit-sub" style="margin-top:6px;">✅ You've shown up for this ${totalCheckins} time${
             totalCheckins === 1 ? '' : 's'
           } in total.</p>
+           <p class="habit-sub" style="margin-top:2px;">📈 Hit the target in ${hitWeeks} of ${completedWeeks} recent completed week${
+            completedWeeks === 1 ? '' : 's'
+          }.</p>
            ${extraHtml}
            ${notesHtml}`
         : '';
@@ -717,11 +865,15 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
         <button type="button" class="insight-label insight-toggle-btn" data-id="${habit.id}">${habit.icon} ${escapeHtml(
         habit.name
       )} ${insightExpanded ? '▲' : '▾'}</button>
-        <p class="insight-value">${done}/${habit.target} this week</p>
+        <p class="insight-value">${adjustedTarget === 0 ? 'Paused this week' : `${done}/${adjustedTarget} this week`}</p>
+        <p class="insight-summary">${paceText} · Last week: ${previousSummary}</p>
         ${weekStripHtml}
         ${detailsHtml}
       </div>`;
     });
+
+    html += `<div class="section-heading achievements-heading"><h2>Achievements</h2><p>Celebrate the progress you've earned; only the next goals stay visible.</p></div>`;
+    html += renderMilestonesHtml(active);
 
     panel.innerHTML = html;
 
@@ -733,19 +885,20 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
         renderInsights();
       });
     });
+
+    panel.querySelectorAll('.milestone-toggle-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.id;
+        if (expandedMilestoneFor.has(id)) expandedMilestoneFor.delete(id);
+        else expandedMilestoneFor.add(id);
+        renderInsights();
+      });
+    });
   }
 
-  // ---------- Milestones tab ----------
+  // ---------- Milestones within Insights ----------
 
-  function renderMilestones() {
-    const panel = document.getElementById('tab-milestones');
-    const active = state.habits.filter((h) => !h.archived);
-
-    if (active.length === 0) {
-      panel.innerHTML = `<div class="empty-state"><h3>Nothing yet</h3><p>Check in on a habit and milestones will show up here.</p></div>`;
-      return;
-    }
-
+  function renderMilestonesHtml(active) {
     let html = '';
     active.forEach((habit) => {
       const c = rampVars(habit.ramp);
@@ -753,7 +906,10 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
       const achievedCheckinCount = CHECKIN_MILESTONES.filter((m) => totalCheckins >= m).length;
       const sortedKeys = habit.checkins ? Object.keys(habit.checkins).sort() : [];
 
-      const badgesHtml = CHECKIN_MILESTONES.map((m) => {
+      const next = CHECKIN_MILESTONES.find((m) => totalCheckins < m);
+      const nextIndex = next ? CHECKIN_MILESTONES.indexOf(next) : CHECKIN_MILESTONES.length;
+      const visibleCheckinMilestones = CHECKIN_MILESTONES.filter((m, index) => totalCheckins >= m || index <= nextIndex + 1);
+      const badgesHtml = visibleCheckinMilestones.map((m) => {
         const achieved = totalCheckins >= m;
         const title = achieved
           ? sortedKeys[m - 1]
@@ -767,7 +923,6 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
         </div>`;
       }).join('');
 
-      const next = CHECKIN_MILESTONES.find((m) => totalCheckins < m);
       const nextHtml = next
         ? `<p class="habit-sub" style="margin-top:8px;color:var(--text-muted);">Next: ${next} check-ins (${
             next - totalCheckins
@@ -775,7 +930,11 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
         : `<p class="habit-sub" style="margin-top:8px;color:var(--text-muted);">All milestones reached 🎉</p>`;
 
       const streakInfo = streakMilestoneInfo(habit);
-      const streakBadgesHtml = STREAK_MILESTONES.map((m) => {
+      const nextStreakIndex = STREAK_MILESTONES.findIndex((m) => streakInfo.longest < m);
+      const visibleStreakMilestones = STREAK_MILESTONES.filter(
+        (m, index) => streakInfo.longest >= m || index <= (nextStreakIndex === -1 ? STREAK_MILESTONES.length : nextStreakIndex)
+      );
+      const streakBadgesHtml = visibleStreakMilestones.map((m) => {
         const achieved = streakInfo.longest >= m;
         const achievedDate = streakInfo.dates[m];
         const title = achieved
@@ -826,17 +985,7 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
         ${detailsHtml}
       </div>`;
     });
-
-    panel.innerHTML = html;
-
-    panel.querySelectorAll('.milestone-toggle-btn').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const id = btn.dataset.id;
-        if (expandedMilestoneFor.has(id)) expandedMilestoneFor.delete(id);
-        else expandedMilestoneFor.add(id);
-        renderMilestones();
-      });
-    });
+    return html;
   }
 
   // ---------- Habit create/edit modal ----------
@@ -857,7 +1006,7 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
           type: 'build',
         };
 
-    const dayAbbr = DAY_ABBR;
+    const dayIndices = [1, 2, 3, 4, 5, 6, 0];
 
     root.innerHTML = `
       <div class="modal-overlay" id="modal-overlay">
@@ -873,30 +1022,17 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
             <div class="freq-options" id="type-options">
               <button type="button" class="freq-chip type-chip ${
                 (draft.type || 'build') === 'build' ? 'selected' : ''
-              }" data-type="build">Build a habit</button>
+              }" data-type="build" aria-pressed="${(draft.type || 'build') === 'build'}">Build a habit</button>
               <button type="button" class="freq-chip type-chip ${
                 draft.type === 'avoid' ? 'selected' : ''
-              }" data-type="avoid">Avoid a habit</button>
-            </div>
-          </div>
-          <div class="form-group">
-            <label>Time of day (optional)</label>
-            <div class="freq-options" id="time-of-day-options">
-              ${['', 'morning', 'afternoon', 'evening']
-                .map(
-                  (t) =>
-                    `<button type="button" class="freq-chip time-chip ${
-                      (draft.timeOfDay || '') === t ? 'selected' : ''
-                    }" data-time="${t}">${t ? t[0].toUpperCase() + t.slice(1) : 'Any'}</button>`
-                )
-                .join('')}
+              }" data-type="avoid" aria-pressed="${draft.type === 'avoid'}">Avoid a habit</button>
             </div>
           </div>
           <div class="form-group">
             <label>Schedule</label>
             <div class="freq-options" id="schedule-mode-options">
-              <button type="button" class="freq-chip schedule-mode-chip ${!draft.scheduleDays ? 'selected' : ''}" data-mode="count">Any days/week</button>
-              <button type="button" class="freq-chip schedule-mode-chip ${draft.scheduleDays ? 'selected' : ''}" data-mode="days">Specific days</button>
+              <button type="button" class="freq-chip schedule-mode-chip ${!draft.scheduleDays ? 'selected' : ''}" data-mode="count" aria-pressed="${!draft.scheduleDays}">Any days/week</button>
+              <button type="button" class="freq-chip schedule-mode-chip ${draft.scheduleDays ? 'selected' : ''}" data-mode="days" aria-pressed="${!!draft.scheduleDays}">Specific days</button>
             </div>
           </div>
           <div class="form-group" id="weekly-target-group" style="${draft.scheduleDays ? 'display:none;' : ''}">
@@ -905,7 +1041,7 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
               ${[1, 2, 3, 4, 5, 6, 7]
                 .map(
                   (n) =>
-                    `<button type="button" class="freq-chip target-chip ${n === draft.target ? 'selected' : ''}" data-val="${n}">${n}x</button>`
+                    `<button type="button" class="freq-chip target-chip ${n === draft.target ? 'selected' : ''}" data-val="${n}" aria-pressed="${n === draft.target}">${n}x</button>`
                 )
                 .join('')}
             </div>
@@ -913,42 +1049,63 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
           <div class="form-group" id="schedule-days-group" style="${draft.scheduleDays ? '' : 'display:none;'}">
             <label>Days</label>
             <div class="freq-options" id="schedule-days-options">
-              ${dayAbbr
+              ${dayIndices
                 .map(
-                  (d, i) =>
+                  (i) =>
                     `<button type="button" class="freq-chip day-chip ${
                       draft.scheduleDays && draft.scheduleDays.includes(i) ? 'selected' : ''
-                    }" data-day="${i}">${d}</button>`
+                    }" data-day="${i}" aria-pressed="${!!(draft.scheduleDays && draft.scheduleDays.includes(i))}">${DAY_ABBR[i]}</button>`
                 )
                 .join('')}
             </div>
             <p class="error-text" id="schedule-error" style="display:none;">Pick at least one day.</p>
           </div>
-          <div class="form-group">
-            <label>Icon</label>
-            <div class="icon-options" id="icon-options">
-              ${ICON_CHOICES.map(
-                (ic) => `<button type="button" class="icon-chip ${ic === draft.icon ? 'selected' : ''}" data-icon="${ic}">${ic}</button>`
-              ).join('')}
+          <details class="advanced-options" ${isEdit ? 'open' : ''}>
+            <summary>Customize appearance, timing, and fallback</summary>
+            <div class="advanced-options-body">
+              <div class="form-group">
+                <label>Time of day (optional)</label>
+                <div class="freq-options" id="time-of-day-options">
+                  ${['', 'morning', 'afternoon', 'evening']
+                    .map(
+                      (t) =>
+                        `<button type="button" class="freq-chip time-chip ${
+                          (draft.timeOfDay || '') === t ? 'selected' : ''
+                        }" data-time="${t}" aria-pressed="${(draft.timeOfDay || '') === t}">${
+                          t ? t[0].toUpperCase() + t.slice(1) : 'Any'
+                        }</button>`
+                    )
+                    .join('')}
+                </div>
+              </div>
+              <div class="form-group">
+                <label>Icon</label>
+                <div class="icon-options" id="icon-options">
+                  ${ICON_CHOICES.map(
+                    (ic) => `<button type="button" class="icon-chip ${ic === draft.icon ? 'selected' : ''}" data-icon="${ic}" aria-pressed="${ic === draft.icon}">${ic}</button>`
+                  ).join('')}
+                </div>
+              </div>
+              <div class="form-group">
+                <label>Color</label>
+                <div class="color-options" id="color-options">
+                  ${RAMPS.map(
+                    (r) =>
+                      `<button type="button" class="color-chip ${r === draft.ramp ? 'selected' : ''}" data-ramp="${r}" style="background:var(--${r}-mid);" aria-label="${r}" aria-pressed="${r === draft.ramp}"></button>`
+                  ).join('')}
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="habit-reminder">Reminder time (optional)</label>
+                <input type="time" id="habit-reminder" value="${draft.reminderTime || ''}" />
+              </div>
+              <div class="form-group">
+                <label for="habit-mini">Minimum version (optional)</label>
+                <input type="text" id="habit-mini" placeholder="e.g. Read 1 page" value="${escapeHtml(draft.miniVersion || '')}" />
+                <p class="form-hint">A tiny fallback that still counts on difficult days.</p>
+              </div>
             </div>
-          </div>
-          <div class="form-group">
-            <label>Color</label>
-            <div class="color-options" id="color-options">
-              ${RAMPS.map(
-                (r) =>
-                  `<button type="button" class="color-chip ${r === draft.ramp ? 'selected' : ''}" data-ramp="${r}" style="background:var(--${r}-mid);" aria-label="${r}"></button>`
-              ).join('')}
-            </div>
-          </div>
-          <div class="form-group">
-            <label for="habit-reminder">Reminder time (optional)</label>
-            <input type="time" id="habit-reminder" value="${draft.reminderTime || ''}" />
-          </div>
-          <div class="form-group">
-            <label for="habit-mini">Minimum version (optional)</label>
-            <input type="text" id="habit-mini" placeholder="e.g. Read 1 page" value="${escapeHtml(draft.miniVersion || '')}" />
-          </div>
+          </details>
           <div class="modal-actions">
             <button class="btn-secondary" id="modal-cancel">Cancel</button>
             <button class="btn-primary" id="modal-save">${isEdit ? 'Save' : 'Create'}</button>
@@ -957,11 +1114,17 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
       </div>
     `;
 
+    activateModal(root);
+
     let selectedType = draft.type || 'build';
     root.querySelectorAll('.type-chip').forEach((chip) => {
       chip.addEventListener('click', () => {
-        root.querySelectorAll('.type-chip').forEach((c) => c.classList.remove('selected'));
+        root.querySelectorAll('.type-chip').forEach((c) => {
+          c.classList.remove('selected');
+          c.setAttribute('aria-pressed', 'false');
+        });
         chip.classList.add('selected');
+        chip.setAttribute('aria-pressed', 'true');
         selectedType = chip.dataset.type;
       });
     });
@@ -969,8 +1132,12 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
     let selectedTimeOfDay = draft.timeOfDay || '';
     root.querySelectorAll('.time-chip').forEach((chip) => {
       chip.addEventListener('click', () => {
-        root.querySelectorAll('.time-chip').forEach((c) => c.classList.remove('selected'));
+        root.querySelectorAll('.time-chip').forEach((c) => {
+          c.classList.remove('selected');
+          c.setAttribute('aria-pressed', 'false');
+        });
         chip.classList.add('selected');
+        chip.setAttribute('aria-pressed', 'true');
         selectedTimeOfDay = chip.dataset.time;
       });
     });
@@ -978,8 +1145,12 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
     let selectedTarget = draft.target;
     root.querySelectorAll('.target-chip').forEach((chip) => {
       chip.addEventListener('click', () => {
-        root.querySelectorAll('.target-chip').forEach((c) => c.classList.remove('selected'));
+        root.querySelectorAll('.target-chip').forEach((c) => {
+          c.classList.remove('selected');
+          c.setAttribute('aria-pressed', 'false');
+        });
         chip.classList.add('selected');
+        chip.setAttribute('aria-pressed', 'true');
         selectedTarget = Number(chip.dataset.val);
       });
     });
@@ -988,8 +1159,12 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
     const selectedDays = new Set(draft.scheduleDays || []);
     root.querySelectorAll('.schedule-mode-chip').forEach((chip) => {
       chip.addEventListener('click', () => {
-        root.querySelectorAll('.schedule-mode-chip').forEach((c) => c.classList.remove('selected'));
+        root.querySelectorAll('.schedule-mode-chip').forEach((c) => {
+          c.classList.remove('selected');
+          c.setAttribute('aria-pressed', 'false');
+        });
         chip.classList.add('selected');
+        chip.setAttribute('aria-pressed', 'true');
         scheduleMode = chip.dataset.mode;
         root.querySelector('#weekly-target-group').style.display = scheduleMode === 'count' ? '' : 'none';
         root.querySelector('#schedule-days-group').style.display = scheduleMode === 'days' ? '' : 'none';
@@ -1001,9 +1176,11 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
         if (selectedDays.has(day)) {
           selectedDays.delete(day);
           chip.classList.remove('selected');
+          chip.setAttribute('aria-pressed', 'false');
         } else {
           selectedDays.add(day);
           chip.classList.add('selected');
+          chip.setAttribute('aria-pressed', 'true');
         }
       });
     });
@@ -1012,8 +1189,12 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
     let iconManuallySet = isEdit;
     root.querySelectorAll('.icon-chip').forEach((chip) => {
       chip.addEventListener('click', () => {
-        root.querySelectorAll('.icon-chip').forEach((c) => c.classList.remove('selected'));
+        root.querySelectorAll('.icon-chip').forEach((c) => {
+          c.classList.remove('selected');
+          c.setAttribute('aria-pressed', 'false');
+        });
         chip.classList.add('selected');
+        chip.setAttribute('aria-pressed', 'true');
         selectedIcon = chip.dataset.icon;
         iconManuallySet = true;
       });
@@ -1022,8 +1203,12 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
     let selectedRamp = draft.ramp;
     root.querySelectorAll('.color-chip').forEach((chip) => {
       chip.addEventListener('click', () => {
-        root.querySelectorAll('.color-chip').forEach((c) => c.classList.remove('selected'));
+        root.querySelectorAll('.color-chip').forEach((c) => {
+          c.classList.remove('selected');
+          c.setAttribute('aria-pressed', 'false');
+        });
         chip.classList.add('selected');
+        chip.setAttribute('aria-pressed', 'true');
         selectedRamp = chip.dataset.ramp;
       });
     });
@@ -1033,7 +1218,11 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
       if (isEdit || iconManuallySet) return;
       const suggested = assignIcon(nameInputEl.value, state.habits.length);
       selectedIcon = suggested;
-      root.querySelectorAll('.icon-chip').forEach((c) => c.classList.toggle('selected', c.dataset.icon === suggested));
+      root.querySelectorAll('.icon-chip').forEach((c) => {
+        const selected = c.dataset.icon === suggested;
+        c.classList.toggle('selected', selected);
+        c.setAttribute('aria-pressed', String(selected));
+      });
     });
 
     root.querySelector('#modal-cancel').addEventListener('click', closeModal);
@@ -1110,6 +1299,8 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
 
   function closeModal() {
     document.getElementById('modal-root').innerHTML = '';
+    if (modalReturnFocus && typeof modalReturnFocus.focus === 'function') modalReturnFocus.focus();
+    modalReturnFocus = null;
   }
 
   // ---------- Settings modal ----------
@@ -1147,6 +1338,8 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
         </div>
       </div>
     `;
+
+    activateModal(root);
 
     root.querySelector('#modal-overlay').addEventListener('click', (e) => {
       if (e.target.id === 'modal-overlay') closeModal();
@@ -1199,6 +1392,8 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
       </div>
     `;
 
+    activateModal(root);
+
     root.querySelector('#modal-cancel').addEventListener('click', closeModal);
     root.querySelector('#modal-overlay').addEventListener('click', (e) => {
       if (e.target.id === 'modal-overlay') closeModal();
@@ -1244,6 +1439,8 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
     root.querySelector('#modal-overlay').addEventListener('click', (e) => {
       if (e.target.id === 'modal-overlay') closeModal();
     });
+    activateModal(root);
+
     root.querySelector('#modal-cancel').addEventListener('click', closeModal);
     root.querySelector('#modal-mark-clean').addEventListener('click', () => {
       toggleCheckinForDate(habit, key);
@@ -1301,6 +1498,8 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
         </div>
       </div>
     `;
+
+    activateModal(root);
 
     root.querySelector('#modal-cancel').addEventListener('click', closeModal);
     root.querySelector('#modal-overlay').addEventListener('click', (e) => {
@@ -1376,6 +1575,8 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
       </div>
     `;
 
+    activateModal(root);
+
     root.querySelector('#modal-cancel').addEventListener('click', closeModal);
     root.querySelector('#modal-overlay').addEventListener('click', (e) => {
       if (e.target.id === 'modal-overlay') closeModal();
@@ -1417,8 +1618,17 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
 
   function switchTab(tab) {
     uiState.currentTab = tab;
-    document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
-    document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === `tab-${tab}`));
+    document.querySelectorAll('.tab-btn').forEach((button) => {
+      const selected = button.dataset.tab === tab;
+      button.classList.toggle('active', selected);
+      button.setAttribute('aria-selected', String(selected));
+      button.tabIndex = selected ? 0 : -1;
+    });
+    document.querySelectorAll('.tab-panel').forEach((panel) => {
+      const selected = panel.id === `tab-${tab}`;
+      panel.classList.toggle('active', selected);
+      panel.hidden = !selected;
+    });
     renderAll();
   }
 
@@ -1427,7 +1637,6 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
     renderWeek();
     renderHabitsTab();
     renderInsights();
-    renderMilestones();
   }
 
   // ---------- init ----------
@@ -1435,8 +1644,21 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
   async function init() {
     setRenderCallbacks({ renderToday, renderAll });
     await loadState();
-    document.querySelectorAll('.tab-btn').forEach((btn) => {
+    const tabButtons = Array.from(document.querySelectorAll('.tab-btn'));
+    tabButtons.forEach((btn, index) => {
       btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+      btn.addEventListener('keydown', (event) => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault();
+        let nextIndex = index;
+        if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabButtons.length) % tabButtons.length;
+        if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabButtons.length;
+        if (event.key === 'Home') nextIndex = 0;
+        if (event.key === 'End') nextIndex = tabButtons.length - 1;
+        const next = tabButtons[nextIndex];
+        switchTab(next.dataset.tab);
+        next.focus();
+      });
     });
     if (window.api.onNavigateToToday) {
       window.api.onNavigateToToday(() => switchTab('today'));
@@ -1447,7 +1669,7 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
         renderAll();
       });
     }
-    renderAll();
+    switchTab(uiState.currentTab);
   }
 
   init();

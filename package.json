@@ -1,7 +1,7 @@
 {
   "name": "habit-tracker",
   "version": "1.0.0",
-  "description": "A simple cross-platform habit tracking app",
+  "description": "A gentle, flexible weekly habit tracker without broken-streak guilt",
   "main": "main.js",
   "scripts": {
     "start": "electron .",

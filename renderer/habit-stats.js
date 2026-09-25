@@ -15,37 +15,74 @@ export function activePauseWindow(habit, key) {
   return habit.pauseWindows.find((w) => key >= w.from && key <= w.until) || null;
 }
 
-export function weekOverlapsPause(habit, weekStart) {
-  if (!habit.pauseWindows) return false;
-  return weekDates(weekStart).some((d) => activePauseWindow(habit, dateKey(d)));
+export function effectiveWeeklyTarget(habit, weekStart) {
+  const dates = weekDates(weekStart);
+  const relevantDates = habit.scheduleDays
+    ? dates.filter((d) => habit.scheduleDays.includes(d.getDay()))
+    : dates;
+  const availableDates = relevantDates.filter((d) => !activePauseWindow(habit, dateKey(d)));
+
+  if (availableDates.length === 0) return 0;
+  if (habit.scheduleDays) return availableDates.length;
+
+  const target = Math.max(1, Number(habit.target) || 1);
+  return Math.ceil(target * (availableDates.length / relevantDates.length));
+}
+
+function weekIsMet(habit, weekStart) {
+  const adjustedTarget = effectiveWeeklyTarget(habit, weekStart);
+  return adjustedTarget === 0 || weeklyCount(habit, weekStart) >= adjustedTarget;
+}
+
+function localDateFromKey(key) {
+  const [year, month, day] = key.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function firstCheckinWeek(habit) {
+  const keys = habit.checkins ? Object.keys(habit.checkins).sort() : [];
+  return keys.length ? getWeekStart(localDateFromKey(keys[0])) : null;
+}
+
+function hasMetWeekOnOrBefore(habit, fromWeek, firstWeek) {
+  const cursor = new Date(fromWeek);
+  for (let i = 0; cursor >= firstWeek && i < 520; i++) {
+    if (weekIsMet(habit, cursor)) return true;
+    cursor.setDate(cursor.getDate() - 7);
+  }
+  return false;
 }
 
 export function weeklyStreak(habit) {
-  const now = new Date();
+  const firstWeek = firstCheckinWeek(habit);
+  if (!firstWeek) return { count: 0, graceUsed: false };
+
   let streak = 0;
   let graceUsed = false;
-  let weekStart = getWeekStart(now);
-  if (weeklyCount(habit, weekStart) >= habit.target || weekOverlapsPause(habit, weekStart)) streak++;
-  let cursor = new Date(weekStart);
+  const currentWeek = getWeekStart(new Date());
+  const cursor = new Date(currentWeek);
+
+  // An in-progress week cannot break a streak or consume its monthly grace.
+  if (weekIsMet(habit, cursor)) {
+    streak++;
+  }
   cursor.setDate(cursor.getDate() - 7);
+
   const usedGraceMonths = new Set();
-  // guard against runaway loops on very old data
-  for (let i = 0; i < 520; i++) {
-    const c = weeklyCount(habit, cursor);
-    if (c >= habit.target || weekOverlapsPause(habit, cursor)) {
+  for (let i = 0; cursor >= firstWeek && i < 520; i++) {
+    if (weekIsMet(habit, cursor)) {
       streak++;
-      cursor.setDate(cursor.getDate() - 7);
     } else {
       const graceKey = `${cursor.getFullYear()}-${cursor.getMonth()}`;
-      if (!usedGraceMonths.has(graceKey)) {
+      if (!usedGraceMonths.has(graceKey) && hasMetWeekOnOrBefore(habit, cursor, firstWeek)) {
         usedGraceMonths.add(graceKey);
         streak++;
         graceUsed = true;
-        cursor.setDate(cursor.getDate() - 7);
       } else {
         break;
       }
     }
+    cursor.setDate(cursor.getDate() - 7);
   }
   return { count: streak, graceUsed };
 }
@@ -103,11 +140,8 @@ export function recentHabitNotes(habit, limit) {
 }
 
 export function longestStreakEver(habit) {
-  if (!habit.checkins) return 0;
-  const keys = Object.keys(habit.checkins).sort();
-  if (keys.length === 0) return 0;
-
-  const start = getWeekStart(new Date(keys[0]));
+  const start = firstCheckinWeek(habit);
+  if (!start) return 0;
   const end = getWeekStart(new Date());
 
   let longest = 0;
@@ -116,13 +150,19 @@ export function longestStreakEver(habit) {
   let iterations = 0;
   const usedGraceMonths = new Set();
   while (cursor <= end && iterations < 1000) {
-    const count = weeklyCount(habit, cursor);
-    if (count >= habit.target || weekOverlapsPause(habit, cursor)) {
+    const isCurrentWeek = dateKey(cursor) === dateKey(end);
+    if (isCurrentWeek && !weekIsMet(habit, cursor)) {
+      cursor.setDate(cursor.getDate() + 7);
+      iterations++;
+      continue;
+    }
+
+    if (weekIsMet(habit, cursor)) {
       current++;
       if (current > longest) longest = current;
     } else {
       const graceKey = `${cursor.getFullYear()}-${cursor.getMonth()}`;
-      if (!usedGraceMonths.has(graceKey)) {
+      if (current > 0 && !usedGraceMonths.has(graceKey)) {
         usedGraceMonths.add(graceKey);
         current++;
         if (current > longest) longest = current;
@@ -139,11 +179,8 @@ export function longestStreakEver(habit) {
 export function streakMilestoneInfo(habit) {
   const dates = {};
   let longest = 0;
-  if (!habit.checkins) return { longest, dates };
-  const keys = Object.keys(habit.checkins).sort();
-  if (keys.length === 0) return { longest, dates };
-
-  const start = getWeekStart(new Date(keys[0]));
+  const start = firstCheckinWeek(habit);
+  if (!start) return { longest, dates };
   const end = getWeekStart(new Date());
 
   let current = 0;
@@ -151,14 +188,20 @@ export function streakMilestoneInfo(habit) {
   let iterations = 0;
   const usedGraceMonths = new Set();
   while (cursor <= end && iterations < 1000) {
-    const count = weeklyCount(habit, cursor);
+    const isCurrentWeek = dateKey(cursor) === dateKey(end);
+    if (isCurrentWeek && !weekIsMet(habit, cursor)) {
+      cursor.setDate(cursor.getDate() + 7);
+      iterations++;
+      continue;
+    }
+
     let met = false;
-    if (count >= habit.target || weekOverlapsPause(habit, cursor)) {
+    if (weekIsMet(habit, cursor)) {
       current++;
       met = true;
     } else {
       const graceKey = `${cursor.getFullYear()}-${cursor.getMonth()}`;
-      if (!usedGraceMonths.has(graceKey)) {
+      if (current > 0 && !usedGraceMonths.has(graceKey)) {
         usedGraceMonths.add(graceKey);
         current++;
         met = true;
@@ -183,7 +226,7 @@ export function perfectMonthsCount(habit) {
   const keys = Object.keys(habit.checkins).sort();
   if (keys.length === 0) return 0;
 
-  const start = getWeekStart(new Date(keys[0]));
+  const start = firstCheckinWeek(habit);
   const end = getWeekStart(new Date());
   const now = new Date();
   const currentMonthKey = `${now.getFullYear()}-${now.getMonth()}`;
@@ -192,13 +235,14 @@ export function perfectMonthsCount(habit) {
   const cursor = new Date(start);
   let iterations = 0;
   while (cursor <= end && iterations < 1000) {
-    if (weekOverlapsPause(habit, cursor)) {
+    const adjustedTarget = effectiveWeeklyTarget(habit, cursor);
+    if (adjustedTarget === 0) {
       cursor.setDate(cursor.getDate() + 7);
       iterations++;
-      continue; // paused weeks don't count for or against a perfect month
+      continue; // fully paused weeks don't count for or against a perfect month
     }
     const monthKey = `${cursor.getFullYear()}-${cursor.getMonth()}`;
-    const met = weeklyCount(habit, cursor) >= habit.target;
+    const met = weeklyCount(habit, cursor) >= adjustedTarget;
     if (!months[monthKey]) months[monthKey] = { total: 0, allMet: true };
     months[monthKey].total++;
     if (!met) months[monthKey].allMet = false;

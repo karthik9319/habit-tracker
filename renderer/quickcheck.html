@@ -40,12 +40,19 @@
       cursor: pointer;
     }
     .quick-habit-btn:hover { background: #F3F0E8; }
+    .quick-habit-btn:focus-visible { outline: 3px solid #7F77DD; outline-offset: 2px; }
     .quick-habit-btn:disabled { opacity: 0.5; cursor: default; }
     .empty-msg {
       font-size: 13px;
       color: #6B6A63;
       text-align: center;
       margin-top: 24px;
+    }
+    @media (prefers-color-scheme: dark) {
+      body { background: #1E1D1A; color: #F2F0E8; }
+      h1, .empty-msg { color: #B4B2A9; }
+      .quick-habit-btn { background: #28271F; color: #F2F0E8; border-color: #3D3B31; }
+      .quick-habit-btn:hover { background: #322F24; }
     }
   </style>
 </head>

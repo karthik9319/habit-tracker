@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { dateKey, getWeekStart } from '../renderer/date-utils.js';
+import { dateKey, getWeekStart, weekDates } from '../renderer/date-utils.js';
 import {
+  effectiveWeeklyTarget,
   weeklyStreak,
   longestStreakEver,
   perfectMonthsCount,
@@ -27,14 +28,10 @@ function habitWithCheckinsOnWeekStarts(weeksAgoList, target = 1) {
 }
 
 test('weeklyStreak counts all consecutive met weeks', () => {
-  // current week + 3 prior weeks, all met. Note: the function walks past the
-  // real data into empty history and forgives the first empty week it hits
-  // via monthly grace (pre-existing behavior, unrelated to what we're
-  // checking here), so we assert a lower bound rather than an exact count —
-  // the exact boundary depends on how calendar months line up with "today".
   const habit = habitWithCheckinsOnWeekStarts([0, 1, 2, 3]);
   const result = weeklyStreak(habit);
-  assert.ok(result.count >= 4, `expected at least 4, got ${result.count}`);
+  assert.equal(result.count, 4);
+  assert.equal(result.graceUsed, false);
 });
 
 test('weeklyStreak forgives exactly one missed week via monthly grace', () => {
@@ -47,13 +44,40 @@ test('weeklyStreak forgives exactly one missed week via monthly grace', () => {
 
 test('weeklyStreak treats a paused week as met without consuming grace', () => {
   const habit = habitWithCheckinsOnWeekStarts([0, 2]);
-  // pause covers the entire missing week (1 week ago)
-  const pausedWeekStart = weekStartKeyWeeksAgo(1);
-  habit.pauseWindows = [{ from: pausedWeekStart, until: pausedWeekStart }];
+  const pausedWeek = weekDates(getWeekStart(new Date(weekStartKeyWeeksAgo(1))));
+  habit.pauseWindows = [{ from: dateKey(pausedWeek[0]), until: dateKey(pausedWeek[6]) }];
   const result = weeklyStreak(habit);
-  // week0 + paused week1 + week2 are all "met" without touching grace;
-  // same boundary caveat as above applies to the upper bound.
-  assert.ok(result.count >= 3, `expected at least 3, got ${result.count}`);
+  assert.equal(result.count, 3);
+  assert.equal(result.graceUsed, false);
+});
+
+test('weeklyStreak returns zero for a new habit with no check-ins', () => {
+  assert.deepEqual(weeklyStreak({ target: 3, checkins: {} }), { count: 0, graceUsed: false });
+});
+
+test('weeklyStreak ignores an unfinished current week instead of consuming grace', () => {
+  const habit = habitWithCheckinsOnWeekStarts([1, 2]);
+  assert.deepEqual(weeklyStreak(habit), { count: 2, graceUsed: false });
+});
+
+test('weeklyStreak does not let grace create a streak before any target was met', () => {
+  const habit = habitWithCheckinsOnWeekStarts([1], 2);
+  assert.deepEqual(weeklyStreak(habit), { count: 0, graceUsed: false });
+  assert.equal(longestStreakEver(habit), 0);
+});
+
+test('effectiveWeeklyTarget prorates partial pauses instead of crediting the whole week', () => {
+  const start = getWeekStart(new Date());
+  const dates = weekDates(start);
+  const habit = { target: 7, pauseWindows: [{ from: dateKey(dates[0]), until: dateKey(dates[0]) }] };
+  assert.equal(effectiveWeeklyTarget(habit, start), 6);
+});
+
+test('effectiveWeeklyTarget makes a fully paused week neutral', () => {
+  const start = getWeekStart(new Date());
+  const dates = weekDates(start);
+  const habit = { target: 4, pauseWindows: [{ from: dateKey(dates[0]), until: dateKey(dates[6]) }] };
+  assert.equal(effectiveWeeklyTarget(habit, start), 0);
 });
 
 test('longestStreakEver matches weeklyStreak for a single unbroken run', () => {

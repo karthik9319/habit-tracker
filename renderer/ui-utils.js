@@ -7,6 +7,8 @@ export function showToast(message, options) {
   if (!el) {
     el = document.createElement('div');
     el.id = 'toast';
+    el.setAttribute('role', 'status');
+    el.setAttribute('aria-live', 'polite');
     el.style.cssText =
       'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);color:#fff;' +
       'padding:10px 16px;border-radius:10px;font-size:13px;z-index:200;opacity:0;transition:opacity 0.2s ease, background 0.15s ease;max-width:320px;text-align:center;';

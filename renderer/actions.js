@@ -25,6 +25,7 @@ export function toggleCheckin(habit, btnEl, isMini) {
   } else {
     const gapKey = lastCheckinBeforeToday(habit);
     habit.checkins[key] = { done: true, mini: !!isMini };
+    if (habit.type === 'avoid' && habit.slips) delete habit.slips[key];
     if (gapKey && daysBetween(gapKey, key) >= 10) {
       habit._returnedAfterGap = true;
     }
@@ -60,6 +61,7 @@ export function toggleCheckinForDate(habit, dateKey) {
     delete habit.checkins[dateKey];
   } else {
     habit.checkins[dateKey] = { done: true, mini: false };
+    if (habit.type === 'avoid' && habit.slips) delete habit.slips[dateKey];
     const totalCheckins = Object.keys(habit.checkins).length;
     habit._celebratedMilestones = habit._celebratedMilestones || [];
     if (CHECKIN_MILESTONES.includes(totalCheckins) && !habit._celebratedMilestones.includes(totalCheckins)) {
@@ -77,6 +79,7 @@ export function toggleSlip(habit, dateKey) {
     delete habit.slips[dateKey];
   } else {
     habit.slips[dateKey] = true;
+    if (habit.checkins) delete habit.checkins[dateKey];
   }
   persist();
   _renderAll();

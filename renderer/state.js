@@ -12,6 +12,7 @@ export const uiState = {
   openSlipHabitId: null,
   weekViewMode: 'week',
   monthOffset: 0,
+  selectedHistoryHabitId: null,
 };
 
 export const expandedNotesFor = new Set();
