@@ -15,6 +15,7 @@ one day never resets you to zero.
 - **Backfill and correct check-ins** — History's week grid and single-habit month calendar let you update today or any past day without opening future dates
 - **Per-day notes**, with autosuggested phrases pulled from your own past notes
 - **Vacation pause** — pause a habit for a date range so travel or illness prorates that week's target, preserves momentum fairly, and suppresses reminders
+- **Temporary habits** — set an optional end date for a short course (e.g. "take medicine for a week"); the habit auto-archives itself the day after, with a one-time toast, so you don't have to remember to clean it up
 - **Per-habit reminders** with rotating, low-pressure notification copy, and a snooze option (macOS), plus an optional weekly recap notification (Sunday 8pm)
 - **Menu bar tray icon** showing today's progress, with one-click check-in per habit
 - **Global quick-check window** (⌘/Ctrl+Shift+H) — a small always-on-top popup to check off habits without opening the main window
@@ -95,6 +96,7 @@ Each habit is stored as:
   "timeOfDay": "morning",
   "reminderTime": "08:00",
   "miniVersion": "Walk to the mailbox",
+  "endDate": null,
   "createdAt": "2026-09-11T00:00:00.000Z",
   "archived": false,
   "pauseWindows": [{ "from": "2026-09-20", "until": "2026-09-27" }],
@@ -109,8 +111,10 @@ Each habit is stored as:
 
 `scheduleDays` (an array of JavaScript weekday indices, Sunday = 0) is set instead of `target` when a
 habit uses "specific days" scheduling rather than a raw weekly count. `type` is `"build"` or
-`"avoid"`. Settings (`notificationsEnabled`, `weeklyRecapEnabled`) are stored alongside
-`habits` at the top level of the saved file.
+`"avoid"`. `endDate` (a `"YYYY-MM-DD"` key, or `null`) is the last active day for a temporary
+habit — once passed, it's automatically flipped to `archived: true` on next load. Settings
+(`notificationsEnabled`, `weeklyRecapEnabled`) are stored alongside `habits` at the top level
+of the saved file.
 
 ## Roadmap ideas (not yet built)
 

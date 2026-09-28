@@ -1,4 +1,5 @@
 import { showToast } from './ui-utils.js';
+import { todayKey } from './date-utils.js';
 
 export let state = { habits: [], settings: { notificationsEnabled: true } };
 
@@ -38,6 +39,18 @@ function migrateNoteFields() {
   });
 }
 
+function autoArchiveEndedHabits() {
+  const todayStr = todayKey();
+  const justEnded = state.habits.filter((h) => h.endDate && !h.archived && h.endDate < todayStr);
+  if (justEnded.length === 0) return;
+  justEnded.forEach((h) => {
+    h.archived = true;
+  });
+  persist();
+  if (justEnded.length === 1) showToast(`Archived "${justEnded[0].name}" — its end date passed.`);
+  else showToast(`Archived ${justEnded.length} habits whose end date passed.`);
+}
+
 export async function loadState() {
   try {
     const data = await window.api.loadData();
@@ -48,6 +61,7 @@ export async function loadState() {
     state = { habits: [], settings: { notificationsEnabled: true } };
   }
   migrateNoteFields();
+  autoArchiveEndedHabits();
 }
 
 export async function persist() {
@@ -65,4 +79,5 @@ export async function persist() {
 export function replaceState(newState) {
   state = newState;
   migrateNoteFields();
+  autoArchiveEndedHabits();
 }

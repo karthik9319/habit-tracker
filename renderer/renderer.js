@@ -655,6 +655,8 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
             <div class="habit-manage-info">
               <p class="habit-manage-name">${escapeHtml(habit.name)}</p>
               <p class="habit-manage-meta">${typeMeta}${scheduleMeta}${habit.reminderTime ? ' · reminder ' + habit.reminderTime : ''}${
+          habit.endDate ? ' · ends ' + formatDateKey(habit.endDate) : ''
+        }${
           pauseWindow ? ' · ⏸ paused' : ''
         }</p>
             </div>
@@ -1104,6 +1106,11 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
                 <input type="text" id="habit-mini" placeholder="e.g. Read 1 page" value="${escapeHtml(draft.miniVersion || '')}" />
                 <p class="form-hint">A tiny fallback that still counts on difficult days.</p>
               </div>
+              <div class="form-group">
+                <label for="habit-end-date">Ends on (optional)</label>
+                <input type="date" id="habit-end-date" value="${draft.endDate || ''}" />
+                <p class="form-hint">For a short course — e.g. medicine for a week. Auto-archives the day after.</p>
+              </div>
             </div>
           </details>
           <div class="modal-actions">
@@ -1249,6 +1256,7 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
 
       const reminderTime = root.querySelector('#habit-reminder').value || null;
       const miniVersion = root.querySelector('#habit-mini').value.trim() || null;
+      const endDate = root.querySelector('#habit-end-date').value || null;
 
       let scheduleDays = null;
       let finalTarget = selectedTarget;
@@ -1266,6 +1274,7 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
         h.scheduleDays = scheduleDays;
         h.reminderTime = reminderTime;
         h.miniVersion = miniVersion;
+        h.endDate = endDate;
         h.icon = selectedIcon;
         h.ramp = selectedRamp;
       } else {
@@ -1280,6 +1289,7 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
           scheduleDays,
           reminderTime,
           miniVersion,
+          endDate,
           createdAt: new Date().toISOString(),
           archived: false,
           checkins: {},
