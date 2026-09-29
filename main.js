@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Notification, Menu, Tray, nativeImage, globalShortcut } = require('electron');
+const { app, BrowserWindow, ipcMain, Notification, Menu, Tray, nativeImage, globalShortcut, net, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -89,6 +89,46 @@ function saveData(data) {
   }
 }
 
+async function searchOpenLibraryBooks(query) {
+  const title = typeof query?.title === 'string' ? query.title.trim().slice(0, 200) : '';
+  const author = typeof query?.author === 'string' ? query.author.trim().slice(0, 200) : '';
+  if (!title) return [];
+
+  const params = new URLSearchParams({
+    title,
+    fields: 'key,title,author_name,first_publish_year,cover_i',
+    limit: '8',
+  });
+  if (author) params.set('author', author);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await net.fetch(`https://openlibrary.org/search.json?${params.toString()}`, {
+      signal: controller.signal,
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) throw new Error(`Open Library returned ${response.status}`);
+    const data = await response.json();
+    return (Array.isArray(data.docs) ? data.docs : [])
+      .filter((book) => Number.isFinite(Number(book.cover_i)))
+      .slice(0, 5)
+      .map((book) => {
+        const coverId = Number(book.cover_i);
+        return {
+          key: typeof book.key === 'string' ? book.key : null,
+          title: typeof book.title === 'string' ? book.title : title,
+          author: Array.isArray(book.author_name) ? book.author_name.slice(0, 3).join(', ') : '',
+          year: Number.isFinite(Number(book.first_publish_year)) ? Number(book.first_publish_year) : null,
+          coverId,
+          coverUrl: `https://covers.openlibrary.org/b/id/${coverId}-M.jpg?default=false`,
+        };
+      });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 let mainWindow;
 let tray;
 let quickCheckWindow;
@@ -121,6 +161,10 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url === 'https://openlibrary.org/') shell.openExternal(url);
+    return { action: 'deny' };
+  });
   Menu.setApplicationMenu(null);
 }
 
@@ -425,6 +469,18 @@ app.on('will-quit', () => {
 
 ipcMain.handle('load-data', () => loadData());
 ipcMain.handle('get-storage-info', () => ({ icloud: USING_ICLOUD }));
+ipcMain.handle('search-books', async (_event, query) => {
+  try {
+    return { ok: true, books: await searchOpenLibraryBooks(query) };
+  } catch (err) {
+    console.error('Open Library search failed:', err);
+    return {
+      ok: false,
+      books: [],
+      error: err && err.name === 'AbortError' ? 'Search timed out.' : 'Cover search is unavailable.',
+    };
+  }
+});
 ipcMain.handle('save-data', (_event, data) => {
   const ok = saveData(data);
   buildTrayMenu();

@@ -7,4 +7,5 @@ contextBridge.exposeInMainWorld('api', {
   onDataChanged: (callback) => ipcRenderer.on('data-changed', callback),
   toggleHabit: (habitId) => ipcRenderer.invoke('toggle-habit', habitId),
   getStorageInfo: () => ipcRenderer.invoke('get-storage-info'),
+  searchBooks: (query) => ipcRenderer.invoke('search-books', query),
 });

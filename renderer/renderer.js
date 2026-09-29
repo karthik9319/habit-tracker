@@ -658,8 +658,11 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
         const rating = numericRating
           ? `<span class="book-rating" aria-label="${numericRating} out of 5 stars">${'★'.repeat(numericRating)}${'☆'.repeat(5 - numericRating)}</span>`
           : '';
+        const coverHtml = book.coverUrl
+          ? `<img src="${escapeHtml(book.coverUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" />`
+          : '<span aria-hidden="true">📖</span>';
         html += `<article class="book-card" data-id="${escapeHtml(book.id)}">
-          <div class="book-cover-mark" aria-hidden="true">📖</div>
+          <div class="book-cover-mark">${coverHtml}</div>
           <div class="book-info">
             <h3>${escapeHtml(book.title)}</h3>
             ${book.author ? `<p class="book-author">by ${escapeHtml(book.author)}</p>` : ''}
@@ -672,11 +675,17 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
           </div>
         </article>`;
       });
-      html += `</div>`;
+      html += `</div>
+        <p class="book-cover-credit">Book covers provided by <a href="https://openlibrary.org" target="_blank" rel="noreferrer">Open Library</a>.</p>`;
     }
 
     panel.innerHTML = html;
     panel.querySelector('#add-book-btn').addEventListener('click', () => openBookModal(null));
+    panel.querySelectorAll('.book-cover-mark img').forEach((img) => {
+      img.addEventListener('error', () => {
+        img.parentElement.innerHTML = '<span aria-hidden="true">📖</span>';
+      });
+    });
     panel.querySelectorAll('.edit-book-btn').forEach((btn) => {
       btn.addEventListener('click', (event) => {
         const id = event.target.closest('.book-card').dataset.id;
@@ -1412,6 +1421,17 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
             <input type="text" id="book-author" placeholder="Author name" value="${escapeHtml(draft.author || '')}" />
           </div>
           <div class="form-group">
+            <label>Cover (optional)</label>
+            <div id="selected-cover-preview" class="selected-cover-preview"></div>
+            <div class="cover-picker-actions">
+              <button type="button" class="btn-secondary" id="find-book-cover">Find cover</button>
+              <button type="button" class="btn-text" id="remove-book-cover">Remove cover</button>
+            </div>
+            <p class="form-hint">Search sends the title and author to Open Library.</p>
+            <p class="cover-search-status" id="cover-search-status" role="status"></p>
+            <div class="cover-search-results" id="cover-search-results"></div>
+          </div>
+          <div class="form-group">
             <label for="book-finished-on">Finished on</label>
             <input type="date" id="book-finished-on" max="${todayKey()}" value="${draft.finishedOn || todayKey()}" />
             <p class="error-text" id="book-date-error" style="display:none;">Choose a date no later than today.</p>
@@ -1441,6 +1461,97 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
       </div>`;
 
     activateModal(root);
+    let selectedCover = draft.coverUrl
+      ? {
+          coverUrl: draft.coverUrl,
+          coverId: draft.coverId || null,
+          openLibraryKey: draft.openLibraryKey || null,
+        }
+      : null;
+
+    function renderSelectedCover() {
+      const preview = root.querySelector('#selected-cover-preview');
+      const removeButton = root.querySelector('#remove-book-cover');
+      if (selectedCover) {
+        preview.innerHTML = `<img src="${escapeHtml(
+          selectedCover.coverUrl
+        )}" alt="Selected book cover" referrerpolicy="no-referrer" /><span>Cover selected</span>`;
+        preview.querySelector('img').addEventListener('error', () => {
+          preview.innerHTML = '<span>That cover could not be loaded. Try another.</span>';
+        });
+        removeButton.hidden = false;
+      } else {
+        preview.innerHTML = '<span class="cover-placeholder" aria-hidden="true">📖</span><span>No cover selected</span>';
+        removeButton.hidden = true;
+      }
+    }
+
+    renderSelectedCover();
+    root.querySelector('#remove-book-cover').addEventListener('click', () => {
+      selectedCover = null;
+      root.querySelector('#cover-search-results').innerHTML = '';
+      root.querySelector('#cover-search-status').textContent = '';
+      renderSelectedCover();
+    });
+    root.querySelector('#find-book-cover').addEventListener('click', async () => {
+      const title = root.querySelector('#book-title').value.trim();
+      const author = root.querySelector('#book-author').value.trim();
+      const status = root.querySelector('#cover-search-status');
+      const results = root.querySelector('#cover-search-results');
+      const button = root.querySelector('#find-book-cover');
+      if (!title) {
+        root.querySelector('#book-title-error').style.display = 'block';
+        root.querySelector('#book-title').focus();
+        return;
+      }
+      root.querySelector('#book-title-error').style.display = 'none';
+      button.disabled = true;
+      button.textContent = 'Searching…';
+      status.textContent = '';
+      results.innerHTML = '';
+      try {
+        const response = await window.api.searchBooks({ title, author });
+        const matches = response && response.ok && Array.isArray(response.books) ? response.books : [];
+        if (!response || !response.ok) {
+          status.textContent = (response && response.error) || 'Cover search is unavailable.';
+          return;
+        }
+        if (matches.length === 0) {
+          status.textContent = 'No covers found. Try adding the author or adjusting the title.';
+          return;
+        }
+        status.textContent = 'Choose the matching edition:';
+        results.innerHTML = matches
+          .map(
+            (match, index) => `<button type="button" class="cover-result-btn" data-index="${index}">
+              <img src="${escapeHtml(match.coverUrl)}" alt="" referrerpolicy="no-referrer" />
+              <span><strong>${escapeHtml(match.title)}</strong><small>${escapeHtml(match.author || 'Unknown author')}${
+              match.year ? ` · ${match.year}` : ''
+            }</small></span>
+            </button>`
+          )
+          .join('');
+        results.querySelectorAll('.cover-result-btn').forEach((resultButton) => {
+          resultButton.addEventListener('click', () => {
+            const match = matches[Number(resultButton.dataset.index)];
+            selectedCover = {
+              coverUrl: match.coverUrl,
+              coverId: match.coverId,
+              openLibraryKey: match.key,
+            };
+            results.innerHTML = '';
+            status.textContent = '';
+            renderSelectedCover();
+          });
+        });
+      } catch (err) {
+        status.textContent = 'Cover search is unavailable.';
+      } finally {
+        button.disabled = false;
+        button.textContent = 'Find cover';
+      }
+    });
+
     root.querySelector('#modal-cancel').addEventListener('click', closeModal);
     root.querySelector('#modal-overlay').addEventListener('click', (event) => {
       if (event.target.id === 'modal-overlay') closeModal();
@@ -1468,6 +1579,9 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
         finishedOn,
         rating: Number(root.querySelector('#book-rating').value) || null,
         note: root.querySelector('#book-note').value.trim() || null,
+        coverUrl: selectedCover ? selectedCover.coverUrl : null,
+        coverId: selectedCover ? selectedCover.coverId : null,
+        openLibraryKey: selectedCover ? selectedCover.openLibraryKey : null,
         updatedAt: new Date().toISOString(),
       };
       if (isEdit) {

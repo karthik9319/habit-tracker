@@ -11,7 +11,7 @@ one day never resets you to zero.
 - **Weekly momentum streak** (🔥) — tracks momentum across completed weeks, with one gentle grace week per month and no penalty for the unfinished current week
 - **Minimum viable fallback** — define a smaller version of a habit (e.g. "Read 1 page") that still counts
 - **Today / History / Books / Insights / Habits tabs** — quick check-in, accessible week and month editing, a finished-book shelf, useful progress patterns with integrated achievements, and habit management
-- **Finished-book log** — record a title, author, finish date, optional rating, and a thought to remember without turning the book itself into another recurring habit
+- **Finished-book log** — record a title, author, finish date, optional rating, a thought to remember, and an optional cover selected from Open Library
 - **Time-of-day grouping** — tag a habit Morning/Afternoon/Evening and the Today tab clusters it accordingly (handy for e.g. splitting a routine into an AM and PM habit)
 - **Backfill and correct check-ins** — History's week grid and single-habit month calendar let you update today or any past day without opening future dates
 - **Per-day notes**, with autosuggested phrases pulled from your own past notes
@@ -21,7 +21,7 @@ one day never resets you to zero.
 - **Menu bar tray icon** showing today's progress, with one-click check-in per habit
 - **Global quick-check window** (⌘/Ctrl+Shift+H) — a small always-on-top popup to check off habits without opening the main window
 - **Settings screen** — toggle reminders/weekly recap, and copy/import your data as JSON
-- **Local-only storage** — all data lives in a JSON file on your machine, nothing leaves your computer, with automatic daily backups (30-day retention)
+- **Local-first storage** — tracker data lives in a JSON file on your machine with automatic daily backups (30-day retention); only an explicit cover search sends its title/author query to Open Library
 - **Optional iCloud Drive sync** (macOS) — if iCloud Drive is available, your data file lives there instead, so multiple Macs stay in sync
 - **No guilt UI** — broken streaks disappear quietly instead of showing a "you failed" state
 
@@ -115,9 +115,9 @@ habit uses "specific days" scheduling rather than a raw weekly count. `type` is 
 `"avoid"`. `endDate` (a `"YYYY-MM-DD"` key, or `null`) is the last active day for a temporary
 habit — once passed, it's automatically flipped to `archived: true` on next load. Finished books
 are stored in a separate top-level `books` array so they remain accomplishments rather than recurring
-check-ins. Each entry records `title`, optional `author`, `finishedOn`, optional `rating`, and an
-optional `note`. Settings (`notificationsEnabled`, `weeklyRecapEnabled`) are stored alongside `habits`
-and `books` at the top level of the saved file.
+check-ins. Each entry records `title`, optional `author`, `finishedOn`, optional `rating`, optional
+`note`, and optional Open Library cover metadata. Settings (`notificationsEnabled`,
+`weeklyRecapEnabled`) are stored alongside `habits` and `books` at the top level of the saved file.
 
 ## Roadmap ideas (not yet built)
 
