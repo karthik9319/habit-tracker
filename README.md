@@ -10,7 +10,8 @@ one day never resets you to zero.
 - **Build or avoid habits** — track a habit you're building, or one you're trying to quit ("clean days" instead of check-ins)
 - **Weekly momentum streak** (🔥) — tracks momentum across completed weeks, with one gentle grace week per month and no penalty for the unfinished current week
 - **Minimum viable fallback** — define a smaller version of a habit (e.g. "Read 1 page") that still counts
-- **Today / History / Insights / Habits tabs** — quick check-in, accessible week and month editing, useful progress patterns with integrated achievements, and habit management
+- **Today / History / Books / Insights / Habits tabs** — quick check-in, accessible week and month editing, a finished-book shelf, useful progress patterns with integrated achievements, and habit management
+- **Finished-book log** — record a title, author, finish date, optional rating, and a thought to remember without turning the book itself into another recurring habit
 - **Time-of-day grouping** — tag a habit Morning/Afternoon/Evening and the Today tab clusters it accordingly (handy for e.g. splitting a routine into an AM and PM habit)
 - **Backfill and correct check-ins** — History's week grid and single-habit month calendar let you update today or any past day without opening future dates
 - **Per-day notes**, with autosuggested phrases pulled from your own past notes
@@ -112,9 +113,11 @@ Each habit is stored as:
 `scheduleDays` (an array of JavaScript weekday indices, Sunday = 0) is set instead of `target` when a
 habit uses "specific days" scheduling rather than a raw weekly count. `type` is `"build"` or
 `"avoid"`. `endDate` (a `"YYYY-MM-DD"` key, or `null`) is the last active day for a temporary
-habit — once passed, it's automatically flipped to `archived: true` on next load. Settings
-(`notificationsEnabled`, `weeklyRecapEnabled`) are stored alongside `habits` at the top level
-of the saved file.
+habit — once passed, it's automatically flipped to `archived: true` on next load. Finished books
+are stored in a separate top-level `books` array so they remain accomplishments rather than recurring
+check-ins. Each entry records `title`, optional `author`, `finishedOn`, optional `rating`, and an
+optional `note`. Settings (`notificationsEnabled`, `weeklyRecapEnabled`) are stored alongside `habits`
+and `books` at the top level of the saved file.
 
 ## Roadmap ideas (not yet built)
 

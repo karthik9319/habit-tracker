@@ -31,7 +31,7 @@ const BACKUP_DIR = path.join(app.getPath('userData'), 'backups');
 const BACKUP_RETENTION_DAYS = 30;
 
 function defaultData() {
-  return { habits: [], settings: { notificationsEnabled: true, weeklyRecapEnabled: true } };
+  return { habits: [], books: [], settings: { notificationsEnabled: true, weeklyRecapEnabled: true } };
 }
 
 function loadData() {

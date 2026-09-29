@@ -626,6 +626,76 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
     </div>`;
   }
 
+  // ---------- Books tab ----------
+
+  function renderBooks() {
+    const panel = document.getElementById('tab-books');
+    const books = [...(state.books || [])].sort((a, b) => {
+      const byDate = (b.finishedOn || '').localeCompare(a.finishedOn || '');
+      return byDate || (b.createdAt || '').localeCompare(a.createdAt || '');
+    });
+    const currentYear = String(new Date().getFullYear());
+    const finishedThisYear = books.filter((book) => (book.finishedOn || '').startsWith(currentYear)).length;
+
+    let html = `<div class="section-heading books-heading">
+      <h2>Finished books</h2>
+      <p>Keep the accomplishment separate from your daily reading check-ins.</p>
+    </div>
+    <button class="btn-primary" id="add-book-btn">+ Log a finished book</button>`;
+
+    if (books.length === 0) {
+      html += `<div class="empty-state books-empty-state">
+        <h3>Your finished shelf is empty</h3>
+        <p>Add the book you just completed — you can backdate it if needed.</p>
+      </div>`;
+    } else {
+      html += `<p class="book-summary"><strong>${finishedThisYear}</strong> finished in ${currentYear} · <strong>${books.length}</strong> all time</p>
+        <div class="book-list">`;
+      books.forEach((book) => {
+        const numericRating = Math.max(0, Math.min(5, Number(book.rating) || 0));
+        const finishedYear = (book.finishedOn || '').slice(0, 4);
+        const finishedLabel = `${formatDateKey(book.finishedOn)}${finishedYear && finishedYear !== currentYear ? `, ${finishedYear}` : ''}`;
+        const rating = numericRating
+          ? `<span class="book-rating" aria-label="${numericRating} out of 5 stars">${'★'.repeat(numericRating)}${'☆'.repeat(5 - numericRating)}</span>`
+          : '';
+        html += `<article class="book-card" data-id="${escapeHtml(book.id)}">
+          <div class="book-cover-mark" aria-hidden="true">📖</div>
+          <div class="book-info">
+            <h3>${escapeHtml(book.title)}</h3>
+            ${book.author ? `<p class="book-author">by ${escapeHtml(book.author)}</p>` : ''}
+            <p class="book-meta">Finished ${finishedLabel} ${rating}</p>
+            ${book.note ? `<p class="book-note">${escapeHtml(book.note)}</p>` : ''}
+          </div>
+          <div class="book-actions">
+            <button type="button" class="btn-text edit-book-btn" aria-label="Edit ${escapeHtml(book.title)}">Edit</button>
+            <button type="button" class="btn-text delete-book-btn" aria-label="Delete ${escapeHtml(book.title)}">Delete</button>
+          </div>
+        </article>`;
+      });
+      html += `</div>`;
+    }
+
+    panel.innerHTML = html;
+    panel.querySelector('#add-book-btn').addEventListener('click', () => openBookModal(null));
+    panel.querySelectorAll('.edit-book-btn').forEach((btn) => {
+      btn.addEventListener('click', (event) => {
+        const id = event.target.closest('.book-card').dataset.id;
+        openBookModal(state.books.find((book) => book.id === id));
+      });
+    });
+    panel.querySelectorAll('.delete-book-btn').forEach((btn) => {
+      btn.addEventListener('click', (event) => {
+        const id = event.target.closest('.book-card').dataset.id;
+        const book = state.books.find((item) => item.id === id);
+        if (!book || !window.confirm(`Delete "${book.title}" from your finished books?`)) return;
+        state.books = state.books.filter((item) => item.id !== id);
+        persist();
+        renderBooks();
+        showToast('Book removed.');
+      });
+    });
+  }
+
   // ---------- Habits management tab ----------
 
   function renderHabitsTab() {
@@ -1313,6 +1383,109 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
     modalReturnFocus = null;
   }
 
+  // ---------- Finished book create/edit modal ----------
+
+  function openBookModal(existingBook) {
+    const root = document.getElementById('modal-root');
+    const isEdit = !!existingBook;
+    const draft = existingBook || { title: '', author: '', finishedOn: todayKey(), rating: null, note: '' };
+    const ratingOptions = [
+      [0, 'Not rated'],
+      [1, '★'],
+      [2, '★★'],
+      [3, '★★★'],
+      [4, '★★★★'],
+      [5, '★★★★★'],
+    ];
+
+    root.innerHTML = `
+      <div class="modal-overlay" id="modal-overlay">
+        <div class="modal">
+          <h2>${isEdit ? 'Edit finished book' : 'Log a finished book'}</h2>
+          <div class="form-group">
+            <label for="book-title">Title</label>
+            <input type="text" id="book-title" placeholder="Book title" value="${escapeHtml(draft.title || '')}" />
+            <p class="error-text" id="book-title-error" style="display:none;">Enter the book title.</p>
+          </div>
+          <div class="form-group">
+            <label for="book-author">Author (optional)</label>
+            <input type="text" id="book-author" placeholder="Author name" value="${escapeHtml(draft.author || '')}" />
+          </div>
+          <div class="form-group">
+            <label for="book-finished-on">Finished on</label>
+            <input type="date" id="book-finished-on" max="${todayKey()}" value="${draft.finishedOn || todayKey()}" />
+            <p class="error-text" id="book-date-error" style="display:none;">Choose a date no later than today.</p>
+          </div>
+          <div class="form-group">
+            <label for="book-rating">Rating (optional)</label>
+            <select id="book-rating">
+              ${ratingOptions
+                .map(
+                  ([value, label]) =>
+                    `<option value="${value}" ${Number(draft.rating || 0) === value ? 'selected' : ''}>${label}</option>`
+                )
+                .join('')}
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="book-note">A thought to remember (optional)</label>
+            <textarea id="book-note" class="book-note-input" rows="3" placeholder="What stayed with you?">${escapeHtml(
+              draft.note || ''
+            )}</textarea>
+          </div>
+          <div class="modal-actions">
+            <button class="btn-secondary" id="modal-cancel">Cancel</button>
+            <button class="btn-primary" id="modal-save-book">${isEdit ? 'Save' : 'Add book'}</button>
+          </div>
+        </div>
+      </div>`;
+
+    activateModal(root);
+    root.querySelector('#modal-cancel').addEventListener('click', closeModal);
+    root.querySelector('#modal-overlay').addEventListener('click', (event) => {
+      if (event.target.id === 'modal-overlay') closeModal();
+    });
+    root.querySelector('#modal-save-book').addEventListener('click', () => {
+      const titleInput = root.querySelector('#book-title');
+      const dateInput = root.querySelector('#book-finished-on');
+      const title = titleInput.value.trim();
+      const finishedOn = dateInput.value;
+      const dateIsValid = !!finishedOn && finishedOn <= todayKey();
+      root.querySelector('#book-title-error').style.display = title ? 'none' : 'block';
+      root.querySelector('#book-date-error').style.display = dateIsValid ? 'none' : 'block';
+      if (!title) {
+        titleInput.focus();
+        return;
+      }
+      if (!dateIsValid) {
+        dateInput.focus();
+        return;
+      }
+
+      const values = {
+        title,
+        author: root.querySelector('#book-author').value.trim() || null,
+        finishedOn,
+        rating: Number(root.querySelector('#book-rating').value) || null,
+        note: root.querySelector('#book-note').value.trim() || null,
+        updatedAt: new Date().toISOString(),
+      };
+      if (isEdit) {
+        Object.assign(state.books.find((book) => book.id === existingBook.id), values);
+      } else {
+        state.books.push({
+          id: 'b_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+          ...values,
+          createdAt: new Date().toISOString(),
+        });
+      }
+      persist();
+      closeModal();
+      renderBooks();
+      showToast(isEdit ? 'Book updated.' : 'Book added to your finished shelf.');
+    });
+  }
+
   // ---------- Settings modal ----------
 
   function openSettingsModal() {
@@ -1613,6 +1786,7 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
 
       replaceState({
         habits: parsed.habits,
+        books: Array.isArray(parsed.books) ? parsed.books : [],
         settings: parsed.settings || { notificationsEnabled: true },
       });
       persist();
@@ -1645,6 +1819,7 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
   function renderAll() {
     renderToday();
     renderWeek();
+    renderBooks();
     renderHabitsTab();
     renderInsights();
   }

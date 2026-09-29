@@ -1,7 +1,7 @@
 import { showToast } from './ui-utils.js';
 import { todayKey } from './date-utils.js';
 
-export let state = { habits: [], settings: { notificationsEnabled: true } };
+export let state = { habits: [], books: [], settings: { notificationsEnabled: true } };
 
 // Transient UI state (not persisted). Kept as properties on a shared object,
 // rather than individually exported `let` bindings, because ES module
@@ -54,12 +54,13 @@ function autoArchiveEndedHabits() {
 export async function loadState() {
   try {
     const data = await window.api.loadData();
-    state = data && data.habits ? data : { habits: [], settings: { notificationsEnabled: true } };
+    state = data && data.habits ? data : { habits: [], books: [], settings: { notificationsEnabled: true } };
   } catch (err) {
     console.error('Load failed', err);
     showToast("Couldn't load your data. Starting fresh.");
-    state = { habits: [], settings: { notificationsEnabled: true } };
+    state = { habits: [], books: [], settings: { notificationsEnabled: true } };
   }
+  state.books = Array.isArray(state.books) ? state.books : [];
   migrateNoteFields();
   autoArchiveEndedHabits();
 }
@@ -78,6 +79,7 @@ export async function persist() {
 // modules can't reassign the imported `state` binding directly.
 export function replaceState(newState) {
   state = newState;
+  state.books = Array.isArray(state.books) ? state.books : [];
   migrateNoteFields();
   autoArchiveEndedHabits();
 }
