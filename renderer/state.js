@@ -14,6 +14,8 @@ export const uiState = {
   weekViewMode: 'week',
   monthOffset: 0,
   selectedHistoryHabitId: null,
+  collapsedTodayGroups: new Set(),
+  todayDoneCollapsed: false,
 };
 
 export const expandedNotesFor = new Set();

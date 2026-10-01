@@ -29,7 +29,9 @@ export function toggleCheckin(habit, btnEl, isMini) {
     if (gapKey && daysBetween(gapKey, key) >= 10) {
       habit._returnedAfterGap = true;
     }
-    uiState.openNoteHabitId = habit.id;
+    // Notes are optional; keep check-in lightweight and let the compact
+    // completed row offer an explicit note action.
+    uiState.openNoteHabitId = null;
 
     const totalCheckins = Object.keys(habit.checkins).length;
     habit._celebratedMilestones = habit._celebratedMilestones || [];

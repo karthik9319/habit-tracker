@@ -11,10 +11,11 @@ one day never resets you to zero.
 - **Weekly momentum streak** (🔥) — tracks momentum across completed weeks, with one gentle grace week per month and no penalty for the unfinished current week
 - **Minimum viable fallback** — define a smaller version of a habit (e.g. "Read 1 page") that still counts
 - **Today / History / Books / Insights / Habits tabs** — quick check-in, accessible week and month editing, a finished-book shelf, useful progress patterns with integrated achievements, and habit management
+- **Scalable Today view** — collapsible time groups, compact completed rows, and an optional compact layout once the active habit list grows
 - **Finished-book log** — record a title, author, finish date, optional rating, a thought to remember, and an optional cover selected from Open Library
 - **Time-of-day grouping** — tag a habit Morning/Afternoon/Evening and the Today tab clusters it accordingly (handy for e.g. splitting a routine into an AM and PM habit)
 - **Backfill and correct check-ins** — History's week grid and single-habit month calendar let you update today or any past day without opening future dates
-- **Per-day notes**, with autosuggested phrases pulled from your own past notes
+- **Per-day notes**, with an in-card composer, explicit save/cancel controls, and suggestion chips pulled from your own past notes
 - **Vacation pause** — pause a habit for a date range so travel or illness prorates that week's target, preserves momentum fairly, and suppresses reminders
 - **Temporary habits** — set an optional end date for a short course (e.g. "take medicine for a week"); the habit auto-archives itself the day after, with a one-time toast, so you don't have to remember to clean it up
 - **Per-habit reminders** with rotating, low-pressure notification copy, and a snooze option (macOS), plus an optional weekly recap notification (Sunday 8pm)

@@ -187,7 +187,49 @@ summary:focus-visible {
 .today-summary {
   font-size: 13px;
   color: var(--text-secondary);
-  margin: 16px 0 16px;
+  margin: 16px 0 12px;
+}
+.today-view-controls {
+  display: flex;
+  justify-content: flex-end;
+  margin: -2px 0 12px;
+}
+.today-compact-toggle {
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.today-compact-toggle:hover { border-color: var(--purple-mid); color: var(--text-primary); }
+.today-all-done {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--green-fill);
+  color: var(--green-text);
+}
+.today-all-done span { font-weight: 800; }
+.today-all-done p { margin: 0; font-size: 12px; }
+.today-group-toggle {
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+}
+.today-group-toggle:hover { color: var(--text-secondary); }
+.today-group-meta {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
 }
 .today-group-label {
   font-size: 11px;
@@ -200,11 +242,92 @@ summary:focus-visible {
 .today-group-label:first-child {
   margin-top: 0;
 }
+.today-done-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 22px 0 8px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+}
+.completed-habit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.completed-habit-row {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto 30px;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.completed-habit-icon {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  font-size: 16px;
+}
+.completed-habit-info { min-width: 0; }
+.completed-habit-info p {
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.completed-habit-info span { color: var(--text-muted); font-size: 10.5px; }
+.completed-note-btn {
+  padding: 5px 6px;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 10.5px;
+}
+.completed-note-btn:hover { color: var(--text-primary); }
+.completed-undo-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--green-fill);
+  color: var(--green-text);
+  font-size: 14px;
+  font-weight: 800;
+}
 
 .habit-list {
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+.habit-followup-action {
+  display: block;
+  margin: 4px 0 0 86px;
+  padding: 0;
+  font-size: 12px;
+}
+.habit-followup-row { margin: -4px 0 0 86px; }
+.habit-followup-row .habit-followup-action { margin-left: 0; }
+.habit-card-wrap.is-compact > .habit-followup-action,
+.habit-card-wrap.is-compact .habit-followup-row,
+.habit-card-wrap.is-compact .note-input-row {
+  margin-left: 64px;
 }
 
 .habit-card {
@@ -212,9 +335,32 @@ summary:focus-visible {
   box-shadow: var(--card-shadow);
   border-radius: var(--radius-card);
   padding: 16px 18px;
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 16px;
+}
+.habit-card.is-compact {
+  padding: 11px 13px;
+  gap: 11px;
+}
+.habit-card.is-compact .habit-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  font-size: 19px;
+}
+.habit-card.is-compact .habit-name-row { font-size: 14px; }
+.habit-card.is-compact .habit-sub { font-size: 11px; }
+.habit-card.is-compact .ring-check-btn,
+.habit-card.is-compact .ring-check-btn svg {
+  width: 48px;
+  height: 48px;
+}
+.habit-card.is-compact .ring-check-mark {
+  width: 32px;
+  height: 32px;
+  font-size: 15px;
 }
 
 .habit-icon {
@@ -314,6 +460,17 @@ summary:focus-visible {
 .habit-note-summary-btn:hover {
   color: var(--text-primary);
 }
+.habit-add-note-btn {
+  display: block;
+  margin: 5px 0 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: left;
+}
+.habit-add-note-btn:hover { color: var(--text-primary); }
 .note-delete-btn {
   background: none;
   border: none;
@@ -342,6 +499,70 @@ summary:focus-visible {
 .note-input:focus {
   outline: none;
   border-color: var(--purple-mid);
+}
+
+.habit-note-composer {
+  grid-column: 1 / -1;
+  width: 100%;
+  padding-top: 12px;
+  border-top: 1px solid color-mix(in srgb, var(--border-strong) 65%, transparent);
+}
+.habit-note-composer-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+}
+.habit-note-textarea {
+  display: block;
+  width: 100%;
+  min-height: 62px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  resize: vertical;
+}
+.habit-note-textarea:focus { border-color: var(--purple-mid); }
+.habit-note-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 7px;
+}
+.note-suggestion-chip {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.note-suggestion-chip:hover { border-color: var(--purple-mid); color: var(--text-primary); }
+.habit-note-composer-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.habit-note-composer-actions .btn-text,
+.habit-note-composer-actions .btn-secondary {
+  padding: 7px 11px;
+  font-size: 12px;
+}
+.habit-note-composer-actions .btn-secondary:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .empty-state {

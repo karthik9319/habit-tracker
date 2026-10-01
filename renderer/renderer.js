@@ -94,9 +94,14 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
       return;
     }
 
-    const availableToday = active.filter((h) => !activePauseWindow(h, todayKey()));
+    const today = todayKey();
+    const availableToday = active.filter((h) => !activePauseWindow(h, today));
     const pausedToday = active.length - availableToday.length;
-    const doneToday = availableToday.filter((h) => h.checkins && h.checkins[todayKey()]).length;
+    const doneToday = availableToday.filter((h) => h.checkins && h.checkins[today]).length;
+    const finished = active.filter((h) => h.checkins && h.checkins[today]);
+    const unfinished = active.filter((h) => !(h.checkins && h.checkins[today]));
+    const showCompactToggle = active.length >= 7;
+    const compactView = showCompactToggle && !!(state.settings && state.settings.todayCompactView);
     const now = new Date();
     const hour = now.getHours();
     const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
@@ -110,17 +115,29 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
       <p class="today-summary">${doneToday} of ${availableToday.length} available done today${
         pausedToday ? ` · ${pausedToday} paused` : ''
       }</p>
+      ${
+        showCompactToggle
+          ? `<div class="today-view-controls">
+              <button type="button" class="today-compact-toggle" id="today-compact-toggle" aria-pressed="${compactView}">
+                ${compactView ? 'Comfortable view' : 'Compact view'}
+              </button>
+            </div>`
+          : ''
+      }
       <div id="today-list"></div>
+      <div id="today-done-list"></div>
       <button class="btn-secondary" id="add-habit-btn" style="width:100%;margin-top:14px;">+ Add habit</button>
     `;
 
     const container = panel.querySelector('#today-list');
-    const anyGrouped = active.some((h) => h.timeOfDay);
+    const anyGrouped = unfinished.some((h) => h.timeOfDay);
 
-    if (!anyGrouped) {
+    if (unfinished.length === 0) {
+      container.innerHTML = `<div class="today-all-done"><span>✓</span><p>Everything available is done for today.</p></div>`;
+    } else if (!anyGrouped) {
       const list = document.createElement('div');
       list.className = 'habit-list';
-      active.forEach((habit) => list.appendChild(renderHabitCard(habit)));
+      unfinished.forEach((habit) => list.appendChild(renderHabitCard(habit, { compact: compactView })));
       container.appendChild(list);
     } else {
       const groups = [
@@ -130,25 +147,96 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
         { key: null, label: 'Anytime' },
       ];
       groups.forEach((g) => {
-        const inGroup = active.filter((h) => (h.timeOfDay || null) === g.key);
+        const inGroup = unfinished.filter((h) => (h.timeOfDay || null) === g.key);
         if (inGroup.length === 0) return;
-        const header = document.createElement('p');
-        header.className = 'today-group-label';
-        header.textContent = g.label;
+        const groupId = g.key || 'anytime';
+        const collapsed = uiState.collapsedTodayGroups.has(groupId);
+        const header = document.createElement('button');
+        header.type = 'button';
+        header.className = 'today-group-label today-group-toggle';
+        header.setAttribute('aria-expanded', String(!collapsed));
+        header.innerHTML = `<span>${g.label}</span><span class="today-group-meta">${inGroup.length} ${collapsed ? '▾' : '▲'}</span>`;
+        header.addEventListener('click', () => {
+          if (uiState.collapsedTodayGroups.has(groupId)) uiState.collapsedTodayGroups.delete(groupId);
+          else uiState.collapsedTodayGroups.add(groupId);
+          renderToday();
+        });
         container.appendChild(header);
+        if (collapsed) return;
         const list = document.createElement('div');
         list.className = 'habit-list';
-        inGroup.forEach((habit) => list.appendChild(renderHabitCard(habit)));
+        inGroup.forEach((habit) => list.appendChild(renderHabitCard(habit, { compact: compactView })));
         container.appendChild(list);
+      });
+    }
+
+    if (finished.length > 0) {
+      const doneContainer = panel.querySelector('#today-done-list');
+      const noteComposerOpen = finished.some((habit) => uiState.openNoteHabitId === habit.id);
+      const collapsed = uiState.todayDoneCollapsed && !noteComposerOpen;
+      const header = document.createElement('button');
+      header.type = 'button';
+      header.className = 'today-done-header';
+      header.setAttribute('aria-expanded', String(!collapsed));
+      header.innerHTML = `<span>Done today</span><span>${finished.length} ${collapsed ? '▾' : '▲'}</span>`;
+      header.addEventListener('click', () => {
+        uiState.todayDoneCollapsed = !uiState.todayDoneCollapsed;
+        renderToday();
+      });
+      doneContainer.appendChild(header);
+      if (!collapsed) {
+        const list = document.createElement('div');
+        list.className = 'completed-habit-list';
+        finished.forEach((habit) => {
+          if (uiState.openNoteHabitId === habit.id) list.appendChild(renderHabitCard(habit));
+          else list.appendChild(renderCompletedHabitRow(habit));
+        });
+        doneContainer.appendChild(list);
+      }
+    }
+
+    const compactToggle = panel.querySelector('#today-compact-toggle');
+    if (compactToggle) {
+      compactToggle.addEventListener('click', () => {
+        state.settings = state.settings || {};
+        state.settings.todayCompactView = !compactView;
+        persist();
+        renderToday();
       });
     }
 
     panel.querySelector('#add-habit-btn').addEventListener('click', () => openHabitModal(null));
   }
 
-  function renderHabitCard(habit) {
+  function renderCompletedHabitRow(habit) {
+    const row = document.createElement('div');
+    row.className = 'completed-habit-row';
+    const entry = habit.checkins && habit.checkins[todayKey()];
+    const notes = (habit.dayNotes && habit.dayNotes[todayKey()]) || [];
+    const c = rampVars(habit.ramp);
+    row.innerHTML = `
+      <div class="completed-habit-icon" style="background:${c.fill};">${habit.icon}</div>
+      <div class="completed-habit-info">
+        <p>${escapeHtml(habit.name)}</p>
+        <span>${entry && entry.mini ? 'Minimum version' : 'Completed'}${notes.length ? ` · 📝 ${notes.length}` : ''}</span>
+      </div>
+      <button type="button" class="completed-note-btn" aria-label="Add a note to ${escapeHtml(habit.name)}">${
+      notes.length ? 'Note' : '+ Note'
+    }</button>
+      <button type="button" class="completed-undo-btn" aria-label="Undo ${escapeHtml(habit.name)}">✓</button>`;
+    row.querySelector('.completed-note-btn').addEventListener('click', () => {
+      uiState.todayDoneCollapsed = false;
+      uiState.openNoteHabitId = habit.id;
+      renderToday();
+    });
+    row.querySelector('.completed-undo-btn').addEventListener('click', () => toggleCheckin(habit, null));
+    return row;
+  }
+
+  function renderHabitCard(habit, { compact = false } = {}) {
     const card = document.createElement('div');
     card.className = 'habit-card';
+    if (compact) card.classList.add('is-compact');
     card.style.background = `color-mix(in srgb, var(--${habit.ramp}-fill) 55%, var(--surface))`;
 
     const c0 = rampVars(habit.ramp);
@@ -162,12 +250,12 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
         </div>
       `;
       const wrap = document.createElement('div');
+      wrap.className = `habit-card-wrap${compact ? ' is-compact' : ''}`;
       wrap.appendChild(card);
       const resumeBtn = document.createElement('button');
       resumeBtn.type = 'button';
       resumeBtn.textContent = 'Resume now';
-      resumeBtn.className = 'btn-text';
-      resumeBtn.style.cssText = 'display:block;margin:4px 0 0 86px;padding:0;font-size:12px;';
+      resumeBtn.className = 'btn-text habit-followup-action';
       resumeBtn.addEventListener('click', () => resumeHabitNow(habit));
       wrap.appendChild(resumeBtn);
       return wrap;
@@ -219,6 +307,9 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
       ? `<p class="habit-sub" style="margin-top:1px;">${habit.scheduleDays.map((d) => DAY_ABBR[d]).join(', ')}</p>`
       : '';
     const typeBadge = isAvoid ? `<span class="habit-type-badge">avoid</span>` : '';
+    const addNoteHtml = checkedToday && uiState.openNoteHabitId !== habit.id
+      ? `<button type="button" class="habit-add-note-btn">${todayNotes.length ? '+ Add another note' : '+ Add note'}</button>`
+      : '';
 
     card.innerHTML = `
       <div class="habit-icon" style="background:${c.fill};">${habit.icon}</div>
@@ -227,6 +318,7 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
         <p class="habit-sub">${weekSubLabel}${pauseAdjustment}</p>
         ${scheduleLabel}
         ${notesHtml}
+        ${addNoteHtml}
       </div>
       <button class="ring-check-btn" aria-label="${
         checkedToday ? 'Undo today' : isAvoid ? 'Mark today clean' : 'Mark done today'
@@ -260,36 +352,31 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
       });
     });
 
+    const addNoteBtn = card.querySelector('.habit-add-note-btn');
+    if (addNoteBtn) {
+      addNoteBtn.addEventListener('click', () => {
+        uiState.openNoteHabitId = habit.id;
+        renderToday();
+      });
+    }
+
+    if (checkedToday && uiState.openNoteHabitId === habit.id) {
+      card.appendChild(renderNoteInput(habit));
+    }
+
     const wrap = document.createElement('div');
+    wrap.className = `habit-card-wrap${compact ? ' is-compact' : ''}`;
     wrap.appendChild(card);
 
     if (!checkedToday && habit.miniVersion) {
       const mini = document.createElement('button');
       mini.textContent = `Just do: ${habit.miniVersion}`;
-      mini.className = 'btn-text';
-      mini.style.cssText = 'display:block;margin-top:6px;padding:0;font-size:12px;';
+      mini.className = 'btn-text habit-followup-action';
       const miniWrap = document.createElement('div');
-      miniWrap.style.cssText = 'margin:-4px 0 0 86px;';
+      miniWrap.className = 'habit-followup-row';
       miniWrap.appendChild(mini);
       wrap.appendChild(miniWrap);
       mini.addEventListener('click', () => toggleCheckin(habit, btn, true));
-    }
-
-    if (checkedToday) {
-      if (uiState.openNoteHabitId === habit.id) {
-        wrap.appendChild(renderNoteInput(habit));
-      } else {
-        const addNote = document.createElement('button');
-        addNote.type = 'button';
-        addNote.textContent = todayNotes.length ? '+ add another note' : '+ add a note';
-        addNote.className = 'btn-text';
-        addNote.style.cssText = 'display:block;margin:4px 0 0 86px;padding:0;font-size:12px;';
-        addNote.addEventListener('click', () => {
-          uiState.openNoteHabitId = habit.id;
-          renderToday();
-        });
-        wrap.appendChild(addNote);
-      }
     }
 
     if (isAvoid) {
@@ -300,8 +387,7 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
         const slipLink = document.createElement('button');
         slipLink.type = 'button';
         slipLink.textContent = todayHasSlip ? '⚠️ Slip logged today · Undo' : '⚠️ Log a slip';
-        slipLink.className = 'btn-text';
-        slipLink.style.cssText = 'display:block;margin:4px 0 0 86px;padding:0;font-size:12px;';
+        slipLink.className = 'btn-text habit-followup-action';
         slipLink.addEventListener('click', () => {
           uiState.openSlipHabitId = todayHasSlip ? null : habit.id;
           toggleSlip(habit, todayKeyStr);
@@ -355,50 +441,74 @@ import { toggleCheckin, toggleCheckinForDate, toggleSlip, moveHabit, resumeHabit
 
   function renderNoteInput(habit) {
     const key = todayKey();
-    const suggestions = habitNoteSuggestions(habit);
-    const listId = `note-suggestions-${habit.id}`;
-
-    const row = document.createElement('div');
-    row.className = 'note-input-row';
-    row.innerHTML = `
-      <input type="text" class="note-input" list="${listId}" placeholder="Add a note (optional) — e.g. which book" />
-      <datalist id="${listId}">
-        ${suggestions.map((s) => `<option value="${escapeHtml(s)}"></option>`).join('')}
-      </datalist>
-    `;
-
-    const input = row.querySelector('.note-input');
-    let committed = false;
-
-    const commit = () => {
-      if (committed) return;
-      committed = true;
-      const val = input.value.trim();
-      if (val && habit.checkins[key]) {
-        habit.dayNotes = habit.dayNotes || {};
-        habit.dayNotes[key] = habit.dayNotes[key] || [];
-        habit.dayNotes[key].push(val);
+    const suggestions = habitNoteSuggestions(habit).slice(0, 3);
+    const composer = document.createElement('div');
+    composer.className = 'habit-note-composer';
+    composer.innerHTML = `
+      <label class="habit-note-composer-label" for="note-input-${habit.id}">Add a note</label>
+      <textarea id="note-input-${habit.id}" class="habit-note-textarea" rows="2" placeholder="What would you like to remember?"></textarea>
+      ${
+        suggestions.length
+          ? `<div class="habit-note-suggestions" aria-label="Past note suggestions">
+              ${suggestions
+                .map(
+                  (suggestion) =>
+                    `<button type="button" class="note-suggestion-chip" data-note="${escapeHtml(suggestion)}">${escapeHtml(
+                      suggestion
+                    )}</button>`
+                )
+                .join('')}
+            </div>`
+          : ''
       }
+      <div class="habit-note-composer-actions">
+        <button type="button" class="btn-text cancel-note-btn">Cancel</button>
+        <button type="button" class="btn-secondary save-note-btn" disabled>Save note</button>
+      </div>`;
+
+    const textarea = composer.querySelector('.habit-note-textarea');
+    const saveButton = composer.querySelector('.save-note-btn');
+
+    const closeComposer = () => {
+      uiState.openNoteHabitId = null;
+      renderToday();
+    };
+    const saveNote = () => {
+      const value = textarea.value.trim();
+      if (!value || !(habit.checkins && habit.checkins[key])) return;
+      habit.dayNotes = habit.dayNotes || {};
+      habit.dayNotes[key] = habit.dayNotes[key] || [];
+      habit.dayNotes[key].push(value);
+      expandedNotesFor.add(habit.id);
       uiState.openNoteHabitId = null;
       persist();
       renderToday();
     };
 
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        commit();
-      } else if (e.key === 'Escape') {
-        committed = true;
-        uiState.openNoteHabitId = null;
-        renderToday();
+    textarea.addEventListener('input', () => {
+      saveButton.disabled = !textarea.value.trim();
+    });
+    textarea.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeComposer();
+      } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        saveNote();
       }
     });
-    input.addEventListener('blur', commit);
+    composer.querySelector('.cancel-note-btn').addEventListener('click', closeComposer);
+    saveButton.addEventListener('click', saveNote);
+    composer.querySelectorAll('.note-suggestion-chip').forEach((button) => {
+      button.addEventListener('click', () => {
+        textarea.value = button.dataset.note;
+        saveButton.disabled = false;
+        textarea.focus();
+      });
+    });
 
-    setTimeout(() => input.focus(), 30);
-
-    return row;
+    setTimeout(() => textarea.focus(), 30);
+    return composer;
   }
 
 
